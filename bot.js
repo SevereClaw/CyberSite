@@ -148,6 +148,69 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     log('Создал gist', g.html_url);
   }
 
+  // ---------- музыка и игры ----------
+  const AFILE = 'activity.json';
+  const ACT_PATH = path.join(dataDir, 'activity-data.json');
+  let act = { music: { day: '', tracks: [] }, games: { days: {}, art: {} }, lastTick: 0 };
+  try { act = Object.assign(act, JSON.parse(fs.readFileSync(ACT_PATH, 'utf8'))); } catch (e) {}
+  let actDirty = true, lastTrackKey = '', tickN = 0, lastGamesKey = '';
+  const saveAct = () => { try { fs.writeFileSync(ACT_PATH, JSON.stringify(act)); } catch (e) {} };
+  function coverOf(a) {
+    const img = a.assets && a.assets.large_image;
+    if (!img) return null;
+    if (img.startsWith('mp:')) return 'https://media.discordapp.net/' + img.slice(3);
+    if (img.startsWith('spotify:')) return 'https://i.scdn.co/image/' + img.slice(8);
+    return a.application_id ? `https://cdn.discordapp.com/app-assets/${a.application_id}/${img}.png` : null;
+  }
+  function trackMusic(u) {
+    const d = new Date().toLocaleDateString('sv-SE');
+    if (act.music.day !== d) { act.music = { day: d, tracks: [] }; actDirty = true; }
+    const a = u && u.activities.find(x => x.type === 2 && (x.details || x.state));
+    if (!a) { lastTrackKey = ''; return; }
+    const key = [a.name, a.details, a.state].join('|');
+    if (key === lastTrackKey) return;
+    lastTrackKey = key;
+    const last = act.music.tracks[0];
+    if (last && last.key === key && Date.now() - last.time < 15 * 60_000) return;   // тот же трек после перезапуска
+    const t = a.timestamps;
+    act.music.tracks.unshift({ key, title: a.details || a.state, artist: a.details ? a.state : null, app: a.name,
+      cover: coverOf(a), time: Date.now(), dur: t && t.start && t.end ? t.end - t.start : null });
+    act.music.tracks.length = Math.min(act.music.tracks.length, 10);
+    actDirty = true; saveAct(); schedule();
+  }
+  function gameTick() {
+    const now = Date.now();
+    const delta = act.lastTick ? Math.min(now - act.lastTick, 120_000) : 0;
+    act.lastTick = now;
+    const m = guild && guild.members.cache.get(cfg.ownerId);
+    const games = (m && m.presence ? m.presence.activities : []).filter(a => a.type === 0).map(a => a.name);
+    const d = new Date().toLocaleDateString('sv-SE');
+    if (games.length && delta) {
+      const day = act.games.days[d] = act.games.days[d] || {};
+      for (const g of games) {
+        day[g] = Math.round(((day[g] || 0) + delta / 60_000) * 10) / 10;
+        const art = artCache.get(g);
+        if (art && art.header) act.games.art[g] = art.header;
+      }
+    }
+    const old = new Date(now - 14 * 864e5).toLocaleDateString('sv-SE');
+    for (const k of Object.keys(act.games.days)) if (k < old) delete act.games.days[k];
+    saveAct();
+    const gk = games.join('|');
+    if (gk !== lastGamesKey || (games.length && ++tickN % 5 === 0)) { lastGamesKey = gk; actDirty = true; schedule(); }
+  }
+  function activityFile() {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 864e5).toLocaleDateString('sv-SE');
+      days.push({ date: d, games: act.games.days[d] || {} });
+    }
+    const used = new Set(days.flatMap(x => Object.keys(x.games)));
+    const art = Object.fromEntries(Object.entries(act.games.art).filter(([k]) => used.has(k)));
+    return JSON.stringify({ updated: Date.now(), music: { day: act.music.day, tracks: act.music.tracks.map(({ key, ...t }) => t) }, games: { days, art } });
+  }
+  let gameTimer = null;
+
   // ---------- гости ----------
   const VIS_PATH = path.join(dataDir, 'visitors-data.json');
   let vis = { total: 0, days: {}, srcDays: {}, guests: [] };
@@ -177,15 +240,18 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   async function publish(force = false, online = true) {
     const users = buildUsers();
     logOwner(users);
+    trackMusic(users[cfg.ownerId]);
     const usersJson = JSON.stringify(users);
-    if (!force && usersJson === lastUsersJson && !visDirty) return;
+    if (!force && usersJson === lastUsersJson && !visDirty && !actDirty) return;
     const files = { [FILE]: JSON.stringify({ updated: Date.now(), bot: online, site: siteInfo(), users }) };
     if (visDirty || force) files[VFILE] = visitorsFile();
+    if (actDirty || force) files[AFILE] = activityFile();
     try {
       if (!cfg.gistId) await ensureGist(files);
       else await gh('PATCH', `/gists/${cfg.gistId}`, { files: Object.fromEntries(Object.entries(files).map(([k, v]) => [k, { content: v }])) });
       lastUsersJson = usersJson;
       visDirty = false;
+      actDirty = false;
       lastSent = Date.now();
       emit('gist', { state: 'ok', text: 'обновлено ' + new Date().toLocaleTimeString('ru-RU'), id: cfg.gistId });
       emit('visitors', JSON.parse(visitorsFile()));
@@ -346,6 +412,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     await client.application.fetch().catch(() => {});
     await publish(true);
     hbTimer = setInterval(() => publish(true), HEARTBEAT);
+    gameTimer = setInterval(gameTick, 60_000); gameTick();
     listen();
   });
 
@@ -375,6 +442,8 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     if (stopped) return;
     stopped = true;
     clearInterval(hbTimer);
+    clearInterval(gameTimer);
+    try { gameTick(); } catch (e) {}
     clearTimeout(timer);
     if (ntfyAbort) ntfyAbort.abort();
     try { if (guild) await publish(true, false); } catch (e) {}
