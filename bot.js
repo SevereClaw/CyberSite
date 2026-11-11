@@ -315,11 +315,23 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   }
 
   client.once(Events.ClientReady, async () => {
-    guild = client.guilds.cache.get(String(cfg.guildId));
+    guild = client.guilds.cache.get(String(cfg.guildId))
+      || await client.guilds.fetch(String(cfg.guildId)).catch(() => null);
     if (!guild) {
-      emit('discord', { state: 'error', text: 'Бот не на сервере с этим ID. Пригласи его на сервер (OAuth2 → URL Generator → bot).' });
-      log('Бот не на сервере с guildId из настроек');
-      return;
+      const list = [...client.guilds.cache.values()];
+      log(`Сервера ${cfg.guildId} среди серверов бота нет. Бот состоит на: ${list.map(g => `${g.name} (${g.id})`).join(', ') || 'ни одном'}`);
+      if (list.length === 1) {
+        guild = list[0];
+        log(`Беру единственный сервер бота: «${guild.name}», ID исправлен в настройках`);
+        cfg.guildId = guild.id;
+        saveCfg();
+      } else {
+        const text = list.length
+          ? `В настройках стоит ID ${cfg.guildId}, а бот состоит на: ${list.map(g => `«${g.name}» — ${g.id}`).join('; ')}. Вставь нужный ID в настройки.`
+          : 'Бот не состоит ни на одном сервере. Пригласи его: Developer Portal → OAuth2 → URL Generator → галочка bot → открой ссылку.';
+        emit('discord', { state: 'error', text });
+        return;
+      }
     }
     await guild.members.fetch({ user: IDS, withPresences: true }).catch(e => log('fetch members:', e.message));
     const missing = IDS.filter(id => !guild.members.cache.has(id));
