@@ -223,6 +223,9 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
       <h3>Люди на сайте</h3>
       <div class="fld"><label>Твой Discord ID</label><div class="inp"><input id="ownerId" spellcheck="false"></div></div>
 
+      <h3>Игры</h3>
+      <div class="fld"><label>Не считать играми<small>Программы, которые Discord принимает за игры. По одной в строке, как в журнале после «Играет:»</small></label><div class="inp"><textarea id="ignoreGames" spellcheck="false" style="min-height:90px"></textarea></div></div>
+
       <h3>Программа</h3>
       <label class="tg"><input type="checkbox" id="autostart"><span></span>Запускать вместе с Windows</label>
       <label class="tg"><input type="checkbox" id="startHidden"><span></span>При автозапуске сразу сворачивать в трей</label>
@@ -273,11 +276,13 @@ function fill(c){
   $('autostart').checked = CFG.autostart !== false;
   $('startHidden').checked = CFG.startHidden !== false;
   $('autoUpdate').checked = CFG.autoUpdate !== false;
+  $('ignoreGames').value = (CFG.ignoreGames || []).join('\n');
 }
 function collect(){
   const c = {};
   for (const k of FIELDS) c[k] = $(k).value.trim();
   c.autostart = $('autostart').checked; c.startHidden = $('startHidden').checked; c.autoUpdate = $('autoUpdate').checked;
+  c.ignoreGames = $('ignoreGames').value.split('\n').map(x => x.trim()).filter(Boolean);
   return c;
 }
 $('save').onclick = async () => {

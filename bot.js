@@ -33,13 +33,14 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   const friendList = () => (cfg.friends || []).map(f => typeof f === 'string' ? { id: f, name: '' } : f).filter(f => f && /^\d{17,20}$/.test(String(f.id)));
   const IDS = [cfg.ownerId, ...friendList().map(f => String(f.id))].filter(Boolean);
   const hide = () => cfg.hide || {};
+  const ignored = () => new Set((cfg.ignoreGames || []).map(n => String(n).trim().toLowerCase()).filter(Boolean));
+  const isIgnored = a => a.type === 0 && ignored().has(String(a.name).toLowerCase());
   // Что из твоего статуса можно показывать на сайте (переключатели «не показывать»).
   function privacy(u) {
     if (!u) return u;
     const h = hide();
     if (h.all) return Object.assign({}, u, { discord_status: 'offline', activities: [] });
-    if (!h.games && !h.music) return u;
-    return Object.assign({}, u, { activities: u.activities.filter(a => !(h.games && (a.type === 0 || a.type === 5)) && !(h.music && a.type === 2)) });
+    return Object.assign({}, u, { activities: u.activities.filter(a => !isIgnored(a) && !(h.games && (a.type === 0 || a.type === 5)) && !(h.music && a.type === 2)) });
   }
   const FILE = 'presence.json';
   const VFILE = 'visitors.json';
@@ -143,7 +144,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!r.ok) throw new Error(`GitHub ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    return r.json();
+    return r.status === 204 ? null : r.json();
   }
 
   async function ensureGist(files) {
@@ -193,7 +194,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     const delta = act.lastTick ? Math.min(now - act.lastTick, 120_000) : 0;
     act.lastTick = now;
     const m = guild && guild.members.cache.get(cfg.ownerId);
-    const games = (hide().all || hide().games) ? [] : (m && m.presence ? m.presence.activities : []).filter(a => a.type === 0).map(a => a.name);
+    const games = (hide().all || hide().games) ? [] : (m && m.presence ? m.presence.activities : []).filter(a => a.type === 0 && !isIgnored(a)).map(a => a.name);
     const d = new Date().toLocaleDateString('sv-SE');
     if (games.length && delta) {
       const day = act.games.days[d] = act.games.days[d] || {};
@@ -248,7 +249,25 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   let lastSent = 0;
   let timer = null;
 
+  // Публикации идут строго по одной: два одновременных PATCH дают у GitHub ошибку 409.
+  let busy = null, again = null, conflicts = 0;
   async function publish(force = false, online = true) {
+    if (busy) {
+      again = { force: (again && again.force) || force, online };
+      return busy;
+    }
+    busy = doPublish(force, online).finally(() => { busy = null; });
+    await busy;
+    if (again) { const a = again; again = null; await publish(a.force, a.online); }
+  }
+  async function rotateGist(files) {
+    const old = cfg.gistId;
+    log('Gist перестал принимать обновления, создаю новый (сайт найдёт его сам)');
+    cfg.gistId = '';
+    await ensureGist(files);
+    if (old) await gh('DELETE', `/gists/${old}`).then(() => log('Старый gist удалён')).catch(e => log('Старый gist не удалил:', e.message));
+  }
+  async function doPublish(force, online) {
     const users = buildUsers();
     logOwner(users);
     if (users[cfg.ownerId]) users[cfg.ownerId] = privacy(users[cfg.ownerId]);
@@ -261,7 +280,26 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     if (actDirty || force) files[AFILE] = activityFile();
     try {
       if (!cfg.gistId) await ensureGist(files);
-      else await gh('PATCH', `/gists/${cfg.gistId}`, { files: Object.fromEntries(Object.entries(files).map(([k, v]) => [k, { content: v }])) });
+      else {
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await gh('PATCH', `/gists/${cfg.gistId}`, { files: Object.fromEntries(Object.entries(files).map(([k, v]) => [k, { content: v }])) });
+            conflicts = 0;
+            break;
+          } catch (e) {
+            if (!/GitHub 409/.test(e.message)) throw e;
+            if (attempt < 2) { await new Promise(r => setTimeout(r, 4000 * (attempt + 1))); continue; }
+            if (++conflicts >= 3) {
+              conflicts = 0;
+              files[VFILE] = files[VFILE] || visitorsFile();
+              files[AFILE] = files[AFILE] || activityFile();
+              await rotateGist(files);
+              break;
+            }
+            throw e;
+          }
+        }
+      }
       lastUsersJson = usersJson;
       visDirty = false;
       actDirty = false;

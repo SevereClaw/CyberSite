@@ -19,6 +19,7 @@ const DEFAULTS = {
   ownerId: '326495406970109962',
   friends: ['952898114321281084', '552120303153578015', '813521412165861397', '839747625887465482', '985113810266386432', '983770743198347294'].map(id => ({ id, name: '' })),
   hide: { games: false, music: false, all: false },
+  ignoreGames: ['Wallpaper Engine'],
   gameArt: {}, ntfyTopic: 'sc-site-u1bacv0rngvi2x', siteUrl: 'https://severeclaw.github.io/', gistId: '',
   autostart: true, startHidden: true, autoUpdate: true,
 };
