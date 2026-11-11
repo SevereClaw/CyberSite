@@ -27,18 +27,20 @@ jobs:
           node --check main.js
           node --check bot.js
           node --check preload.js
-      - name: Сборка установщика и релиз
+      - name: Сборка установщика
         env:
           GH_TOKEN: ${{ github.token }}
-        run: npx electron-builder --win --publish always
-      - name: Описание релиза
+        run: npx electron-builder --win --publish never
+      - name: Релиз
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER="$(node -p "require('./package.json').version")"
           MSG="$(git log -1 --pretty=%s)"
-          gh release edit "v$VER" --title "CyberSite $VER" --latest --notes "$MSG
+          ls dist
+          gh release create "v$VER" dist/CyberSite-Setup-*.exe dist/CyberSite-Setup-*.exe.blockmap dist/latest.yml \
+            --target "$GITHUB_SHA" --title "CyberSite $VER" --latest --notes "$MSG
 
           Скачай **CyberSite-Setup-$VER.exe** и запусти. Дальше программа обновляется сама.
           Настройки хранятся в %APPDATA%\\CyberSite и при обновлении не сбрасываются."
