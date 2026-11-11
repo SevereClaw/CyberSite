@@ -19,7 +19,7 @@ const DEFAULTS = {
   ownerId: '326495406970109962',
   friends: ['952898114321281084', '552120303153578015', '813521412165861397', '839747625887465482', '985113810266386432', '983770743198347294'],
   gameArt: {}, ntfyTopic: 'sc-site-u1bacv0rngvi2x', siteUrl: 'https://severeclaw.github.io/', gistId: '',
-  autostart: true, startHidden: true,
+  autostart: true, startHidden: true, autoUpdate: true,
 };
 const startedHidden = process.argv.includes('--hidden');
 
@@ -116,6 +116,7 @@ function createWindow(show) {
   win.on('close', e => {
     if (quitting) return;
     e.preventDefault(); win.hide();
+    if (state.update?.state === 'ready' && cfg?.autoUpdate !== false) { postponed = false; planInstall(); }
     if (!state.trayHinted && Notification.isSupported()) {
       state.trayHinted = true;
       new Notification({ title: 'CyberSite работает в фоне', body: 'Значок в трее: открыть окно или выйти.' }).show();
@@ -153,17 +154,53 @@ function applyAutostart() {
 }
 
 // ---------- обновления ----------
+// Скачиваются сами. Готовое ставится само: сразу, если окно скрыто (программа в трее),
+// или через минуту с обратным отсчётом, если окно открыто (можно отложить).
+let installTimer = null, postponed = false;
+function installNow() {
+  if (!autoUpdater || state.update?.state !== 'ready') return;
+  quitting = true;
+  log('Обновление: ставлю', state.update.version);
+  const go = () => autoUpdater.quitAndInstall(true, true);   // тихо и сразу запустить снова
+  if (bot) Promise.race([bot.stop(), new Promise(r => setTimeout(r, 4000))]).finally(go); else go();
+}
+function planInstall() {
+  clearTimeout(installTimer);
+  if (state.update?.state !== 'ready' || cfg?.autoUpdate === false || postponed) return;
+  const visible = win && win.isVisible() && !win.isMinimized();
+  const delay = visible ? 60_000 : 5_000;
+  emit('update', Object.assign({}, state.update, { installAt: Date.now() + delay }));
+  installTimer = setTimeout(installNow, delay);
+}
+function checkUpdates(manual) {
+  if (!autoUpdater || !app.isPackaged) {
+    if (manual) emit('update', { state: 'none', text: 'Обновления работают только в установленной версии' });
+    return;
+  }
+  if (state.update?.state === 'downloading' || state.update?.state === 'ready') return;
+  emit('update', { state: 'checking', manual });
+  autoUpdater.checkForUpdates().catch(e => {
+    log('Обновление: не смог проверить', e.message);
+    emit('update', { state: 'error', text: 'Не смог проверить обновления: ' + e.message, manual });
+  });
+}
 function setupUpdater() {
   if (!autoUpdater || !app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.logger = { info: m => log('Обновление:', String(m)), warn: () => {}, error: m => log('Обновление: ошибка', String(m)), debug: () => {} };
-  autoUpdater.on('update-available', i => emit('update', { state: 'downloading', version: i.version }));
+  autoUpdater.on('update-not-available', () => emit('update', { state: 'none', text: 'У тебя последняя версия', manual: state.update?.manual }));
+  autoUpdater.on('update-available', i => emit('update', { state: 'downloading', version: i.version, percent: 0 }));
   autoUpdater.on('download-progress', p => emit('update', { state: 'downloading', version: state.update?.version, percent: Math.round(p.percent) }));
   autoUpdater.on('update-downloaded', i => {
+    postponed = false;
     emit('update', { state: 'ready', version: i.version });
-    if (Notification.isSupported()) new Notification({ title: 'CyberSite ' + i.version + ' готов', body: 'Обновится при следующем запуске или по кнопке в окне.' }).show();
+    if (Notification.isSupported()) new Notification({ title: 'CyberSite ' + i.version, body: 'Обновление скачано и сейчас установится.' }).show();
+    planInstall();
   });
-  const check = () => autoUpdater.checkForUpdates().catch(e => log('Обновление: не смог проверить', e.message));
-  check(); setInterval(check, 6 * 3600 * 1000);
+  autoUpdater.on('error', e => emit('update', { state: 'error', text: 'Ошибка обновления: ' + (e?.message || e) }));
+  setTimeout(() => checkUpdates(false), 5_000);
+  setInterval(() => checkUpdates(false), 60 * 60 * 1000);      // раз в час
 }
 
 // ---------- IPC ----------
@@ -195,7 +232,9 @@ ipcMain.handle('restart', () => startBot());
 ipcMain.handle('open', (_e, url) => { if (/^https?:/.test(url)) shell.openExternal(url); });
 ipcMain.handle('openData', () => shell.openPath(DATA));
 ipcMain.handle('win', (_e, a) => { if (!win) return; if (a === 'min') win.minimize(); else if (a === 'max') win.isMaximized() ? win.unmaximize() : win.maximize(); else if (a === 'close') win.close(); else if (a === 'quit') quit(); });
-ipcMain.handle('installUpdate', () => { if (autoUpdater && state.update?.state === 'ready') { quitting = true; bot?.stop().finally(() => autoUpdater.quitAndInstall()); } });
+ipcMain.handle('installUpdate', () => installNow());
+ipcMain.handle('postponeUpdate', () => { postponed = true; clearTimeout(installTimer); emit('update', Object.assign({}, state.update, { installAt: null, postponed: true })); });
+ipcMain.handle('checkUpdate', () => checkUpdates(true));
 
 // ---------- запуск ----------
 app.on('second-instance', showWin);

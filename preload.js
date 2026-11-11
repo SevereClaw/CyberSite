@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('cs', {
   openData: () => ipcRenderer.invoke('openData'),
   win: a => ipcRenderer.invoke('win', a),
   installUpdate: () => ipcRenderer.invoke('installUpdate'),
+  postponeUpdate: () => ipcRenderer.invoke('postponeUpdate'),
+  checkUpdate: () => ipcRenderer.invoke('checkUpdate'),
   pathOf: file => (webUtils && webUtils.getPathForFile ? webUtils.getPathForFile(file) : file.path),
   onState: cb => ipcRenderer.on('state', (_e, s) => cb(s)),
   onLog: cb => ipcRenderer.on('log', (_e, l) => cb(l)),

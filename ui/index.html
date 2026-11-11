@@ -133,7 +133,7 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
   <main>
     <!-- ГЛАВНАЯ -->
     <section class="page on" id="p-home">
-      <div class="banner" id="upd"><p id="updText"></p><button class="btn pri" id="updBtn">Обновить сейчас</button></div>
+      <div class="banner" id="upd"><p id="updText"></p><button class="btn" id="updLater">Позже</button><button class="btn pri" id="updBtn">Обновить сейчас</button></div>
       <div class="banner" id="setupBanner"><p>Бот ещё не настроен. Заполни настройки или перетащи сюда старый <b>config.json</b> — всё перенесётся само.</p><button class="btn pri" data-go="settings">Настроить</button></div>
       <div class="me">
         <div class="ava"><img id="av" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""><i id="st"></i></div>
@@ -197,6 +197,8 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
       <h3>Программа</h3>
       <label class="tg"><input type="checkbox" id="autostart"><span></span>Запускать вместе с Windows</label>
       <label class="tg"><input type="checkbox" id="startHidden"><span></span>При автозапуске сразу сворачивать в трей</label>
+      <label class="tg"><input type="checkbox" id="autoUpdate"><span></span>Устанавливать обновления автоматически</label>
+      <div class="btns" style="margin-top:8px;align-items:center"><button class="btn" id="chk">Проверить обновления</button><span id="updStatus" style="color:var(--dim)"></span></div>
 
       <div class="btns" style="margin-top:24px"><button class="btn pri" id="save">Сохранить и перезапустить бота</button></div>
     </section>
@@ -240,12 +242,13 @@ function fill(c){
   $('friends').value = (CFG.friends||[]).join('\n');
   $('autostart').checked = CFG.autostart !== false;
   $('startHidden').checked = CFG.startHidden !== false;
+  $('autoUpdate').checked = CFG.autoUpdate !== false;
 }
 function collect(){
   const c = {};
   for (const k of FIELDS) c[k] = $(k).value.trim();
   c.friends = $('friends').value.split(/[\s,;]+/).map(s => s.replace(/\D/g,'')).filter(s => s.length >= 17);
-  c.autostart = $('autostart').checked; c.startHidden = $('startHidden').checked;
+  c.autostart = $('autostart').checked; c.startHidden = $('startHidden').checked; c.autoUpdate = $('autoUpdate').checked;
   return c;
 }
 $('save').onclick = async () => {
@@ -264,6 +267,8 @@ $('openData').onclick = () => cs.openData();
 $('restart').onclick = () => { cs.restart(); toast('Перезапускаю бота'); };
 $('openSite').onclick = () => cs.open(CFG.siteUrl || 'https://severeclaw.github.io/');
 $('updBtn').onclick = () => cs.installUpdate();
+$('updLater').onclick = () => cs.postponeUpdate();
+$('chk').onclick = () => cs.checkUpdate();
 $('copyLogs').onclick = () => { navigator.clipboard.writeText($('logs').textContent); toast('Скопировано'); };
 
 /* перетаскивание config.json */
@@ -294,11 +299,25 @@ function render(s){
   }
   $('feedHome').innerHTML = feed(s.visits||[], 6);
   $('feedAll').innerHTML = feed(s.visits||[], 50);
-  const up = s.update;
-  $('upd').classList.toggle('on', !!up);
-  if (up){ $('updText').textContent = up.state==='ready' ? `Скачана новая версия ${up.version}.` : `Скачиваю версию ${up.version}… ${up.percent||0}%`;
-    $('updBtn').style.display = up.state==='ready' ? '' : 'none'; }
+  UP = s.update; renderUpd();
 }
+let UP = null;
+function renderUpd(){
+  const up = UP, st = up?.state;
+  const show = st === 'downloading' || st === 'ready';
+  $('upd').classList.toggle('on', show);
+  if (st === 'downloading') $('updText').textContent = `Скачиваю версию ${up.version}… ${up.percent||0}%`;
+  if (st === 'ready'){
+    const left = up.installAt ? Math.max(0, Math.ceil((up.installAt - Date.now())/1000)) : null;
+    $('updText').textContent = left !== null ? `Версия ${up.version} скачана. Установлю через ${left} с — бот перезапустится сам.`
+      : `Версия ${up.version} скачана. Установится, когда свернёшь окно в трей.`;
+  }
+  $('updBtn').style.display = st === 'ready' ? '' : 'none';
+  $('updLater').style.display = st === 'ready' && up.installAt ? '' : 'none';
+  $('updStatus').textContent = st === 'checking' ? 'проверяю…' : st === 'none' ? (up.text || 'у тебя последняя версия')
+    : st === 'error' ? up.text : st === 'downloading' ? `скачиваю ${up.version}…` : st === 'ready' ? `версия ${up.version} готова` : '';
+}
+setInterval(() => { if (UP?.state === 'ready' && UP.installAt) renderUpd(); }, 1000);
 function addLog(l){ const el=$('logs'); const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
   el.textContent += (el.textContent ? '\n' : '') + l; if (stick) el.scrollTop = 1e9; }
 
