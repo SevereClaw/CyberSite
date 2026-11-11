@@ -63,7 +63,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   const artCache = new Map();          // имя игры -> арт или null (не нашли)
   const norm = s => String(s).toLowerCase().replace(/[™®©:'’!?.,\-–—]/g, ' ').replace(/\s+/g, ' ').trim();
   async function steam(url) {
-    const r = await fetch(url, { headers: { 'User-Agent': 'severeclaw-presence-bot' } });
+    const r = await fetch(url, { headers: { 'User-Agent': 'severeclaw-presence-bot' }, signal: AbortSignal.timeout(15_000) });
     if (!r.ok) throw new Error('Steam ' + r.status);
     return r.json();
   }
@@ -137,7 +137,9 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   }
 
   async function gh(method, url, body) {
+    // Без таймаута повисший запрос (сон ноутбука, смена VPN) навсегда блокировал очередь записей.
     const r = await fetch('https://api.github.com' + url, {
+      signal: AbortSignal.timeout(20_000),
       method,
       headers: {
         Authorization: `Bearer ${cfg.githubToken}`,
@@ -264,13 +266,15 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   let timer = null;
 
   // Публикации идут строго по одной: два одновременных PATCH дают у GitHub ошибку 409.
-  let busy = null, again = null, conflicts = 0;
+  let busy = null, busyAt = 0, again = null, conflicts = 0;
   async function publish(force = false, online = true) {
     if (Date.now() < nextAllowed && online) { schedule(); return; }
+    if (busy && Date.now() - busyAt > 90_000) { log('Запись в gist зависла, начинаю заново'); busy = null; }
     if (busy) {
       again = { force: (again && again.force) || force, online };
       return busy;
     }
+    busyAt = Date.now();
     busy = doPublish(force, online).finally(() => { busy = null; });
     await busy;
     if (again) { const a = again; again = null; await publish(a.force, a.online); }
@@ -390,6 +394,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     usedCodes.add(code);
     try {
       const tr = await fetch('https://discord.com/api/v10/oauth2/token', {
+        signal: AbortSignal.timeout(15_000),
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ client_id: client.application.id, client_secret: cfg.discordClientSecret,
@@ -397,7 +402,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       });
       const tok = await tr.json();
       if (!tok.access_token) return log('Discord-отметка не прошла:', JSON.stringify(tok).slice(0, 200));
-      const u = await (await fetch('https://discord.com/api/v10/users/@me', { headers: { Authorization: `Bearer ${tok.access_token}` } })).json();
+      const u = await (await fetch('https://discord.com/api/v10/users/@me', { signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${tok.access_token}` } })).json();
       if (!u.id) return;
       addGuest({ via: 'discord', id: u.id, name: u.global_name || u.username, handle: '@' + u.username,
         avatar: u.avatar ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=128` : `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(u.id) >> 22n) % 6n)}.png`,
@@ -425,6 +430,8 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     while (!stopped) {
       try {
         ntfyAbort = new AbortController();
+        const ab = ntfyAbort;
+        let idle = setTimeout(() => ab.abort(), 120_000);
         const r = await fetch(`https://ntfy.sh/${TOPIC}/json?since=${encodeURIComponent(ntfySince)}`, { signal: ntfyAbort.signal });
         if (!r.ok) throw new Error('ntfy ' + r.status);
         log('Слушаю сайт (ntfy)');
@@ -432,6 +439,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
         let buf = '';
         const dec = new TextDecoder();
         for await (const chunk of r.body) {
+          clearTimeout(idle); idle = setTimeout(() => ab.abort(), 120_000);
           buf += dec.decode(chunk, { stream: true });
           let i;
           while ((i = buf.indexOf('\n')) >= 0) {
