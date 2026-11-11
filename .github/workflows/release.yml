@@ -1,0 +1,36 @@
+name: Релиз
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Проверка кода
+        run: node --check index.js
+      - name: Сборка архива
+        run: |
+          npm ci --omit=dev
+          mkdir -p out/CyberSite
+          cp -r index.js package.json package-lock.json config.example.json start.bat README.md node_modules out/CyberSite/
+          cd out && zip -qr ../CyberSite.zip CyberSite
+      - name: Релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="1.0.${{ github.run_number }}"
+          MSG="$(git log -1 --pretty=%s)"
+          gh release create "v$VER" CyberSite.zip --title "CyberSite $VER" --notes "$MSG
+
+          Скачай **CyberSite.zip**, распакуй и запусти \`start.bat\`. При обновлении просто замени файлы, свой \`config.json\` оставь." --latest

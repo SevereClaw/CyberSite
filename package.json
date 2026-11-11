@@ -1,0 +1,16 @@
+{
+  "name": "cybersite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Статусы Discord для severeclaw.github.io",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "discord.js": "^14.28.1"
+  }
+}
