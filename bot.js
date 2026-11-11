@@ -328,7 +328,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       minuteStart = Date.now(); sentThisMinute = 0; skipped = 0;
     }
     if (++sentThisMinute > 15) { skipped++; return; }
-    try { await logChannel.send(payload); } catch (e) { log('Не смог написать в канал:', e.message); }
+    try { await logChannel.send(payload); } catch (e) { log(/Cannot send messages to this user|50007/.test(e.message) ? 'Не могу написать тебе в личку: в Discord закрыты сообщения от участников сервера (ПКМ по серверу → Настройки конфиденциальности → Личные сообщения)' : 'Не смог написать про гостя: ' + e.message); }
   }
 
   const SRC_RU = { tg: 'из Telegram', ds: 'из Discord', yt: 'с YouTube', steam: 'из Steam', gh: 'с GitHub', search: 'из поиска', direct: 'напрямую', other: 'с другого сайта' };
@@ -455,11 +455,18 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     log(`Вошёл как ${client.user.tag}, сервер «${guild.name}». Слежу за ${IDS.length - missing.length} из ${IDS.length}.`);
     emit('discord', { state: 'ok', text: `${client.user.tag} · ${guild.name}`, tracked: IDS.length - missing.length, total: IDS.length, missing });
     if (missing.length) log('Нет на сервере (их статус не будет виден):', missing.join(', '));
-    if (cfg.logChannelId && /^\d{17,20}$/.test(String(cfg.logChannelId).trim())) {
+    // Куда писать про гостей: в личку (по умолчанию), в канал или никуда.
+    const where = cfg.notify || 'dm';
+    if (where === 'dm') {
+      const me = await client.users.fetch(String(cfg.ownerId)).catch(() => null);
+      logChannel = me ? await me.createDM().catch(() => null) : null;
+      if (logChannel) log(`Про гостей пишу тебе в личку (${me.username})`);
+      else log('Не смог открыть личку с тобой — про гостей пишу только сюда');
+    } else if (where === 'channel' && /^\d{17,20}$/.test(String(cfg.logChannelId || '').trim())) {
       logChannel = await client.channels.fetch(String(cfg.logChannelId)).catch(() => null);
-      if (!logChannel || !logChannel.isTextBased()) { log('Не нашёл канал logChannelId — про гостей буду писать только сюда'); logChannel = null; }
+      if (!logChannel || !logChannel.isTextBased()) { log('Не нашёл канал для гостей — пишу только сюда'); logChannel = null; }
       else log(`Про гостей пишу в #${logChannel.name}`);
-    }
+    } else log('Про гостей в Discord не пишу (выключено в настройках)');
     await client.application.fetch().catch(() => {});
     await publish(true);
     hbTimer = setInterval(() => publish(true), HEARTBEAT);

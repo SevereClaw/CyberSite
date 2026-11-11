@@ -127,6 +127,11 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
 .add .inp{flex:1}
 .dirty{color:var(--warn);font-size:12px;margin-left:8px;display:none}
 .dirty.on{display:inline}
+.seg{display:inline-flex;border:1px solid var(--line2)}
+.seg button{border:0;background:none;padding:9px 14px;cursor:pointer;color:var(--dim);transition:.15s}
+.seg button+button{border-left:1px solid var(--line2)}
+.seg button:hover{color:var(--fg)}
+.seg button.on{background:var(--acc);color:#04121a;font-weight:600}
 </style>
 </head>
 <body>
@@ -210,7 +215,9 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
       <h3>Discord</h3>
       <div class="fld"><label>Токен бота<small><a data-url="https://discord.com/developers/applications">Developer Portal</a> → Bot → Reset Token</small></label><div><div class="inp"><input type="password" id="discordToken" spellcheck="false"><button data-eye="discordToken">👁</button></div><div class="err" id="e-discordToken"></div></div></div>
       <div class="fld"><label>ID сервера<small>ПКМ по серверу → Копировать ID сервера</small></label><div class="inp"><input id="guildId" spellcheck="false"></div></div>
-      <div class="fld"><label>Канал для гостей<small>ПКМ по каналу → Копировать ID канала. Пусто — не писать в Discord</small></label><div class="inp"><input id="logChannelId" spellcheck="false"></div></div>
+      <div class="fld"><label>Сообщать о гостях<small>Кто зашёл на сайт и кто отметился</small></label><div class="seg" id="notify">
+        <button data-v="dm">Мне в личку</button><button data-v="channel">В канал</button><button data-v="off">Не сообщать</button></div></div>
+      <div class="fld" id="chanRow"><label>Канал для гостей<small>ПКМ по каналу → Копировать ID канала</small></label><div class="inp"><input id="logChannelId" spellcheck="false"></div></div>
 
       <h3>GitHub</h3>
       <div class="fld"><label>Токен GitHub<small><a data-url="https://github.com/settings/tokens/new?scopes=gist&description=CyberSite">Создать токен</a> (classic, галочка gist)</small></label><div class="inp"><input type="password" id="githubToken" spellcheck="false"><button data-eye="githubToken">👁</button></div></div>
@@ -254,6 +261,11 @@ const ST = {online:"в сети", idle:"отошёл", dnd:"не беспоко�
 const SRC = { tg:"Telegram", ds:"Discord", yt:"YouTube", steam:"Steam", gh:"GitHub", search:"поиск", direct:"напрямую", other:"другие сайты" };
 const FIELDS = ['discordToken','guildId','logChannelId','githubToken','discordClientSecret','telegramBotToken','telegramBotName','ownerId'];
 
+/* куда сообщать о гостях */
+let NOTIFY = 'dm';
+function setNotify(v){ NOTIFY = v; document.querySelectorAll('#notify button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); $('chanRow').style.display = v === 'channel' ? '' : 'none'; }
+document.querySelectorAll('#notify button').forEach(b => b.onclick = () => setNotify(b.dataset.v));
+
 /* навигация */
 function go(p){ document.querySelectorAll('.side a').forEach(a => a.classList.toggle('on', a.dataset.p===p));
   document.querySelectorAll('.page').forEach(s => s.classList.toggle('on', s.id==='p-'+p));
@@ -277,11 +289,13 @@ function fill(c){
   $('startHidden').checked = CFG.startHidden !== false;
   $('autoUpdate').checked = CFG.autoUpdate !== false;
   $('ignoreGames').value = (CFG.ignoreGames || []).join('\n');
+  setNotify(CFG.notify || 'dm');
 }
 function collect(){
   const c = {};
   for (const k of FIELDS) c[k] = $(k).value.trim();
   c.autostart = $('autostart').checked; c.startHidden = $('startHidden').checked; c.autoUpdate = $('autoUpdate').checked;
+  c.notify = NOTIFY;
   c.ignoreGames = $('ignoreGames').value.split('\n').map(x => x.trim()).filter(Boolean);
   return c;
 }
