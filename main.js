@@ -17,7 +17,8 @@ const DEFAULTS = {
   discordToken: '', githubToken: '', guildId: '', logChannelId: '',
   discordClientSecret: '', telegramBotToken: '', telegramBotName: '',
   ownerId: '326495406970109962',
-  friends: ['952898114321281084', '552120303153578015', '813521412165861397', '839747625887465482', '985113810266386432', '983770743198347294'],
+  friends: ['952898114321281084', '552120303153578015', '813521412165861397', '839747625887465482', '985113810266386432', '983770743198347294'].map(id => ({ id, name: '' })),
+  hide: { games: false, music: false, all: false },
   gameArt: {}, ntfyTopic: 'sc-site-u1bacv0rngvi2x', siteUrl: 'https://severeclaw.github.io/', gistId: '',
   autostart: true, startHidden: true, autoUpdate: true,
 };
@@ -27,8 +28,11 @@ const startedHidden = process.argv.includes('--hidden');
 const readJson = f => JSON.parse(fs.readFileSync(f, 'utf8').replace(/^﻿/, ''));
 const looksLikeConfig = o => o && typeof o === 'object' && ('discordToken' in o || 'githubToken' in o || 'guildId' in o);
 let cfg = null;
+const normFriends = list => (Array.isArray(list) ? list : []).map(f => typeof f === 'string' ? { id: f, name: '' } : { id: String(f.id || ''), name: String(f.name || '') })
+  .filter(f => /^\d{17,20}$/.test(f.id)).filter((f, i, a) => a.findIndex(x => x.id === f.id) === i);
+function norm(c) { c.friends = normFriends(c.friends); c.hide = Object.assign({ games: false, music: false, all: false }, c.hide || {}); return c; }
 function loadCfg() {
-  try { cfg = Object.assign({}, DEFAULTS, readJson(CFG_PATH)); } catch (e) { cfg = null; }
+  try { cfg = norm(Object.assign({}, DEFAULTS, readJson(CFG_PATH))); } catch (e) { cfg = null; }
   return cfg;
 }
 function saveCfg(c) {
@@ -41,7 +45,7 @@ function saveCfg(c) {
 function importFrom(file) {
   const o = readJson(file);
   if (!looksLikeConfig(o)) throw new Error('Это не похоже на config.json бота.');
-  const merged = Object.assign({}, DEFAULTS, cfg || {}, o);
+  const merged = norm(Object.assign({}, DEFAULTS, cfg || {}, o));
   if (o.autostart === undefined && cfg) merged.autostart = cfg.autostart;
   saveCfg(merged);
   const vis = path.join(path.dirname(file), 'visitors-data.json');
@@ -81,7 +85,7 @@ function log(...a) {
   send('log', line);
 }
 const state = { discord: { state: 'off', text: 'не запущен' }, gist: { state: 'off', text: '—' }, ntfy: { state: 'off', text: '—' },
-  owner: null, visitors: null, visits: [], update: null, imported: null };
+  owner: null, people: null, visitors: null, visits: [], update: null, imported: null };
 function emit(kind, v) {
   if (kind === 'visit') { state.visits.unshift(v); state.visits.length = Math.min(state.visits.length, 50); }
   else state[kind] = v;
@@ -100,6 +104,18 @@ async function startBot() {
   if (err) { emit('discord', { state: 'setup', text: err }); return; }
   bot = createBot({ cfg, dataDir: DATA, saveCfg, log, emit });
   bot.start().catch(() => {});
+}
+
+// ---------- «не показывать на сайте» ----------
+function setHide(h) {
+  if (!cfg) return;
+  cfg.hide = Object.assign({ games: false, music: false, all: false }, cfg.hide, h);
+  saveCfg(cfg);
+  const on = Object.entries({ all: 'невидимка', games: 'игры скрыты', music: 'музыка скрыта' }).filter(([k]) => cfg.hide[k]).map(([, v]) => v);
+  log('На сайте:', on.length ? on.join(', ') : 'показываю всё');
+  if (bot) bot.refresh();
+  send('cfg', cfg);
+  buildTrayMenu();
 }
 
 // ---------- окно и трей ----------
@@ -131,15 +147,24 @@ function updateTray() {
   const d = state.discord.state;
   tray.setToolTip('CyberSite — ' + ({ ok: 'работает', connecting: 'подключается', error: 'ошибка', setup: 'нужно настроить', off: 'выключен' }[d] || d));
 }
-function createTray() {
-  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'build', 'tray.png')));
+function buildTrayMenu() {
+  if (!tray) return;
+  const h = (cfg && cfg.hide) || {};
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Открыть CyberSite', click: showWin },
     { label: 'Открыть сайт', click: () => shell.openExternal(cfg?.siteUrl || DEFAULTS.siteUrl) },
-    { label: 'Перезапустить бота', click: () => startBot() },
     { type: 'separator' },
+    { label: 'Невидимка (скрыть всё)', type: 'checkbox', checked: !!h.all, enabled: !!cfg, click: i => setHide({ all: i.checked }) },
+    { label: 'Скрыть игры', type: 'checkbox', checked: !!h.games, enabled: !!cfg && !h.all, click: i => setHide({ games: i.checked }) },
+    { label: 'Скрыть музыку', type: 'checkbox', checked: !!h.music, enabled: !!cfg && !h.all, click: i => setHide({ music: i.checked }) },
+    { type: 'separator' },
+    { label: 'Перезапустить бота', click: () => startBot() },
     { label: 'Выход', click: () => quit() },
   ]));
+}
+function createTray() {
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'build', 'tray.png')));
+  buildTrayMenu();
   tray.on('click', showWin);
   updateTray();
 }
@@ -206,9 +231,9 @@ function setupUpdater() {
 // ---------- IPC ----------
 ipcMain.handle('get', () => ({ cfg, state, logs, version: app.getVersion(), dataDir: DATA, defaults: DEFAULTS }));
 ipcMain.handle('save', async (_e, c) => {
-  const merged = Object.assign({}, DEFAULTS, cfg || {}, c);
+  const merged = norm(Object.assign({}, DEFAULTS, cfg || {}, c));
   const err = checkConfig(merged);
-  saveCfg(merged); applyAutostart();
+  saveCfg(merged); applyAutostart(); buildTrayMenu();
   log('Настройки сохранены');
   await startBot();
   return { ok: true, warn: err, cfg: merged };
@@ -229,6 +254,7 @@ ipcMain.handle('export', async () => {
   return { ok: true, file: r.filePath };
 });
 ipcMain.handle('restart', () => startBot());
+ipcMain.handle('setHide', (_e, h) => { setHide(h); return cfg; });
 ipcMain.handle('open', (_e, url) => { if (/^https?:/.test(url)) shell.openExternal(url); });
 ipcMain.handle('openData', () => shell.openPath(DATA));
 ipcMain.handle('win', (_e, a) => { if (!win) return; if (a === 'min') win.minimize(); else if (a === 'max') win.isMaximized() ? win.unmaximize() : win.maximize(); else if (a === 'close') win.close(); else if (a === 'quit') quit(); });

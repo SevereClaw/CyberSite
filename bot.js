@@ -30,7 +30,17 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   let stopped = false, hbTimer = null, ntfyAbort = null;
   const saveCfg = () => persist(cfg);
 
-  const IDS = [cfg.ownerId, ...(cfg.friends || [])].filter(Boolean);
+  const friendList = () => (cfg.friends || []).map(f => typeof f === 'string' ? { id: f, name: '' } : f).filter(f => f && /^\d{17,20}$/.test(String(f.id)));
+  const IDS = [cfg.ownerId, ...friendList().map(f => String(f.id))].filter(Boolean);
+  const hide = () => cfg.hide || {};
+  // Что из твоего статуса можно показывать на сайте (переключатели «не показывать»).
+  function privacy(u) {
+    if (!u) return u;
+    const h = hide();
+    if (h.all) return Object.assign({}, u, { discord_status: 'offline', activities: [] });
+    if (!h.games && !h.music) return u;
+    return Object.assign({}, u, { activities: u.activities.filter(a => !(h.games && (a.type === 0 || a.type === 5)) && !(h.music && a.type === 2)) });
+  }
   const FILE = 'presence.json';
   const VFILE = 'visitors.json';
   const MIN_GAP = 15_000;      // не чаще раза в 15 секунд
@@ -183,7 +193,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     const delta = act.lastTick ? Math.min(now - act.lastTick, 120_000) : 0;
     act.lastTick = now;
     const m = guild && guild.members.cache.get(cfg.ownerId);
-    const games = (m && m.presence ? m.presence.activities : []).filter(a => a.type === 0).map(a => a.name);
+    const games = (hide().all || hide().games) ? [] : (m && m.presence ? m.presence.activities : []).filter(a => a.type === 0).map(a => a.name);
     const d = new Date().toLocaleDateString('sv-SE');
     if (games.length && delta) {
       const day = act.games.days[d] = act.games.days[d] || {};
@@ -228,6 +238,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   }
   function siteInfo() {
     return {
+      friends: friendList().map(f => ({ id: String(f.id), name: f.name || '' })),
       discordClientId: cfg.discordClientSecret && client.application ? client.application.id : null,
       telegramBot: cfg.telegramBotToken && cfg.telegramBotName ? cfg.telegramBotName.replace(/^@/, '') : null,
     };
@@ -240,7 +251,9 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   async function publish(force = false, online = true) {
     const users = buildUsers();
     logOwner(users);
+    if (users[cfg.ownerId]) users[cfg.ownerId] = privacy(users[cfg.ownerId]);
     trackMusic(users[cfg.ownerId]);
+    emit('people', { users, friends: friendList(), hide: hide() });
     const usersJson = JSON.stringify(users);
     if (!force && usersJson === lastUsersJson && !visDirty && !actDirty) return;
     const files = { [FILE]: JSON.stringify({ updated: Date.now(), bot: online, site: siteInfo(), users }) };
@@ -451,7 +464,10 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     emit('discord', { state: 'off', text: 'остановлен' });
   }
 
-  return { start, stop };
+  // Поменялись «не показывать» или имена друзей — сразу выложить.
+  function refresh() { lastUsersJson = ''; actDirty = true; if (guild) publish(true); }
+
+  return { start, stop, refresh };
 }
 
 module.exports = { createBot, checkConfig };
