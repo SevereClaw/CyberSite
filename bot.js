@@ -44,8 +44,12 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   }
   const FILE = 'presence.json';
   const VFILE = 'visitors.json';
-  const MIN_GAP = 15_000;      // не чаще раза в 15 секунд
-  const HEARTBEAT = 120_000;   // раз в 2 минуты, даже если ничего не поменялось
+  const MIN_GAP = 30_000;      // не чаще раза в 30 секунд
+  const HEARTBEAT = 240_000;   // раз в 4 минуты, даже если ничего не поменялось
+  // Защита лимитов GitHub: после ошибки пауза растёт (30 с, 1 мин, 2 мин… до 10 мин),
+  // при «rate limit» ждём до времени сброса, которое сообщает GitHub.
+  let nextAllowed = 0, errStreak = 0, rate = null;
+  const hhmm = t => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
   const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildPresences],
@@ -143,7 +147,17 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       },
       body: body ? JSON.stringify(body) : undefined,
     });
-    if (!r.ok) throw new Error(`GitHub ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const rem = r.headers.get('x-ratelimit-remaining');
+    if (rem !== null) rate = { remaining: +rem, limit: +r.headers.get('x-ratelimit-limit'), reset: +r.headers.get('x-ratelimit-reset') * 1000 };
+    if (!r.ok) {
+      const text = (await r.text()).slice(0, 200);
+      const err = new Error(`GitHub ${r.status}: ${text}`);
+      if ((r.status === 403 || r.status === 429) && /rate limit/i.test(text)) {
+        const after = +r.headers.get('retry-after');
+        err.rateLimitUntil = after ? Date.now() + after * 1000 : (rate && rate.remaining === 0 && rate.reset) ? rate.reset + 5000 : Date.now() + 15 * 60_000;
+      }
+      throw err;
+    }
     return r.status === 204 ? null : r.json();
   }
 
@@ -252,6 +266,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   // Публикации идут строго по одной: два одновременных PATCH дают у GitHub ошибку 409.
   let busy = null, again = null, conflicts = 0;
   async function publish(force = false, online = true) {
+    if (Date.now() < nextAllowed && online) { schedule(); return; }
     if (busy) {
       again = { force: (again && again.force) || force, online };
       return busy;
@@ -304,17 +319,28 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       visDirty = false;
       actDirty = false;
       lastSent = Date.now();
-      emit('gist', { state: 'ok', text: 'обновлено ' + new Date().toLocaleTimeString('ru-RU'), id: cfg.gistId });
+      errStreak = 0; nextAllowed = 0;
+      emit('gist', { state: 'ok', text: 'обновлено ' + new Date().toLocaleTimeString('ru-RU') + (rate ? ` · запросов осталось ${rate.remaining} из ${rate.limit}` : ''), id: cfg.gistId });
       emit('visitors', JSON.parse(visitorsFile()));
     } catch (e) {
-      log('Не смог обновить gist:', e.message);
-      emit('gist', { state: 'error', text: /401/.test(e.message) ? 'токен GitHub не подходит (нужен classic с галочкой gist)' : e.message });
+      lastSent = Date.now();
+      errStreak++;
+      if (e.rateLimitUntil) {
+        nextAllowed = e.rateLimitUntil;
+        log(`GitHub ограничил запросы, следующая попытка в ${hhmm(nextAllowed)}`);
+        emit('gist', { state: 'error', text: `GitHub временно ограничил запросы. Продолжу сам в ${hhmm(nextAllowed)}, данные не потеряются.` });
+      } else {
+        nextAllowed = Date.now() + Math.min(30_000 * 2 ** (errStreak - 1), 600_000);
+        log('Не смог обновить gist:', e.message, `— повтор в ${hhmm(nextAllowed)}`);
+        emit('gist', { state: 'error', text: /401/.test(e.message) ? 'токен GitHub не подходит (нужен classic с галочкой gist)' : e.message });
+      }
+      schedule();
     }
   }
 
   function schedule() {
     if (timer) return;
-    const wait = Math.max(0, lastSent + MIN_GAP - Date.now());
+    const wait = Math.max(0, lastSent + MIN_GAP - Date.now(), nextAllowed - Date.now());
     timer = setTimeout(() => { timer = null; if (!stopped) publish(); }, wait);
   }
 
