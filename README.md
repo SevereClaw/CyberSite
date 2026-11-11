@@ -1,48 +1,45 @@
-# CyberSite — бот для severeclaw.github.io
+# CyberSite
 
-**Скачать:** [CyberSite.zip последней версии](https://github.com/SevereClaw/CyberSite/releases/latest/download/CyberSite.zip). Распакуй и запусти `start.bat`.
-Обновление: скачай заново и замени файлы, свой `config.json` не трогай.
+Программа для Windows, которая оживляет [severeclaw.github.io](https://severeclaw.github.io):
+показывает на сайте мой статус Discord и статусы друзей, меняет фон на игру, в которую я играю,
+и пишет в Discord, кто заходил на сайт.
 
-Бот сидит на твоём Discord-сервере, следит за статусами (твоим и друзей) и раз в 15 секунд при изменениях
-кладёт их в публичный gist на GitHub. Сайт читает статусы оттуда.
+**Скачать:** [последняя версия](https://github.com/SevereClaw/CyberSite/releases/latest) → `CyberSite-Setup-….exe`.
+Дальше программа обновляется сама.
 
-Видны только те, кто есть на этом сервере. Кто именно показывается, задаётся в `config.json`.
+## Как устроено
 
-## Настройка (один раз)
+- Бот сидит на твоём Discord-сервере и видит статусы участников (тебя и друзей из настроек).
+- Статусы и статистика гостей выкладываются в публичный gist на GitHub, сайт читает их оттуда.
+- Сайт сообщает о заходах через ntfy.sh, бот их принимает и пишет в выбранный канал.
+- Аватарки гостей появляются только у тех, кто сам нажал «Отметиться» на сайте (Discord или Telegram).
 
-1. **Бот Discord.** https://discord.com/developers/applications → New Application → вкладка **Bot**:
-   - Reset Token → скопируй токен;
-   - включи **PRESENCE INTENT** и **SERVER MEMBERS INTENT**, сохрани.
-2. **Пригласи бота на сервер.** Вкладка **OAuth2 → URL Generator**: галочка `bot`, права не нужны.
-   Открой ссылку и добавь бота на сервер.
-3. **ID сервера.** В Discord: Настройки → Расширенные → Режим разработчика. Потом ПКМ по серверу → «Копировать ID сервера».
-4. **Токен GitHub.** https://github.com/settings/tokens/new (classic) → галочка только **gist** → Generate → скопируй.
-   Fine-grained токены с gist не работают.
-5. Запусти `start.bat`. Он создаст `config.json` и откроет его: вставь туда токен бота, токен GitHub и ID сервера, сохрани.
-6. Снова запусти `start.bat`. При первом запуске бот сам создаст gist, сайт найдёт его автоматически.
+## Первый запуск
 
-Нужен Node.js 18 или новее: https://nodejs.org. Библиотеки уже лежат в архиве, ставить ничего не нужно.
+Если раньше бот запускался через `start.bat`, программа сама найдёт старый `config.json`
+(в «Загрузках», на рабочем столе, в «Документах») и перенесёт настройки и статистику.
+Не нашла — перетащи `config.json` в окно или нажми «Перенести из config.json».
 
-## Гости сайта
+С нуля: открой «Настройки», у каждого поля есть подсказка, где взять значение.
 
-Сайт отправляет боту каждый заход (откуда пришёл человек и с какого устройства, без имён), бот пишет об этом
-в канал Discord и считает статистику. Аватарка и ник попадают в историю, только если гость сам нажал «Отметиться».
+1. **Бот Discord:** [Developer Portal](https://discord.com/developers/applications) → New Application → Bot →
+   Reset Token. Там же включи **PRESENCE INTENT** и **SERVER MEMBERS INTENT**. Пригласи бота: OAuth2 → URL Generator → `bot`.
+2. **ID сервера и канала:** включи режим разработчика в Discord, ПКМ → Копировать ID.
+3. **Токен GitHub:** [создать](https://github.com/settings/tokens/new?scopes=gist&description=CyberSite) — classic, только `gist`.
+4. **Отметки гостей (по желанию):** Discord Client Secret (+ Redirect `https://severeclaw.github.io/` в OAuth2)
+   и токен Telegram-бота (`/newbot`, затем `/setdomain` → `severeclaw.github.io` в @BotFather).
 
-В `config.json`:
-- `logChannelId` — ID канала, куда бот пишет про гостей (ПКМ по каналу → Копировать ID канала). Боту нужно право писать в этот канал.
-- **Отметка через Discord:** Developer Portal → твоё приложение → **OAuth2** → Redirects → добавь `https://severeclaw.github.io/` и сохрани.
-  Там же Reset Secret → скопируй **Client Secret** в `discordClientSecret`.
-- **Отметка через Telegram:** в @BotFather сделай бота (`/newbot`), затем `/setdomain` → выбери бота → `severeclaw.github.io`.
-  Токен бота вставь в `telegramBotToken`, его имя (без @) — в `telegramBotName`.
+## Где что лежит
 
-Пустые поля = кнопки этой отметки на сайте не будет.
+Настройки и статистика — в `%APPDATA%\CyberSite` (кнопка «Папка с настройками»).
+Обновления и переустановка их не трогают.
 
-Чтобы точно видеть, что человек пришёл из твоего канала, давай ссылку вида `https://severeclaw.github.io/?from=tg`
-(или `from=ds`, `from=yt`, `from=steam`): Telegram часто не сообщает сайту, откуда пришёл человек.
+Discord в России заблокирован: программе нужен VPN в режиме **TUN** (системный прокси она не использует).
 
-## Каждый день
+## Разработка
 
-Запускай `start.bat`. Пока окно открыто, статусы на сайте живые. Если бот упадёт, он перезапустится сам.
-Если бот выключен дольше 5 минут, сайт покажет всех «не в сети».
-
-`config.json` с токенами в репозиторий не попадает (он в `.gitignore`), никому его не отправляй.
+```
+npm install
+npm start          # запустить из исходников
+npm run dist       # собрать установщик (делает GitHub Actions при каждом push в main)
+```

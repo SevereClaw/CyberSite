@@ -11,26 +11,34 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+      - name: Версия
+        shell: bash
+        run: npm version "1.1.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+      - run: npm ci
       - name: Проверка кода
-        run: node --check index.js
-      - name: Сборка архива
         run: |
-          npm ci --omit=dev
-          mkdir -p out/CyberSite
-          cp -r index.js package.json package-lock.json config.example.json start.bat README.md node_modules out/CyberSite/
-          cd out && zip -qr ../CyberSite.zip CyberSite
-      - name: Релиз
+          node --check main.js
+          node --check bot.js
+          node --check preload.js
+      - name: Сборка установщика и релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npx electron-builder --win --publish always
+      - name: Описание релиза
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VER="1.0.${{ github.run_number }}"
+          VER="$(node -p "require('./package.json').version")"
           MSG="$(git log -1 --pretty=%s)"
-          gh release create "v$VER" CyberSite.zip --title "CyberSite $VER" --notes "$MSG
+          gh release edit "v$VER" --title "CyberSite $VER" --latest --notes "$MSG
 
-          Скачай **CyberSite.zip**, распакуй и запусти \`start.bat\`. При обновлении просто замени файлы, свой \`config.json\` оставь." --latest
+          Скачай **CyberSite-Setup-$VER.exe** и запусти. Дальше программа обновляется сама.
+          Настройки хранятся в %APPDATA%\\CyberSite и при обновлении не сбрасываются."

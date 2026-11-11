@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src * data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>CyberSite</title>
+<style>
+:root{--bg:#05070d;--panel:#0a0e18;--fg:#e8eef7;--dim:#8492a6;--faint:#4a5568;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);--acc:#66e0ff;--ok:#4ade80;--warn:#ffd36b;--err:#ff6b7d}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font:400 14px/1.55 "Segoe UI",Rubik,system-ui,sans-serif;color:var(--fg);background:var(--bg);overflow:hidden;user-select:none}
+input,textarea,button{font:inherit;color:inherit}
+#dust{position:fixed;inset:0;z-index:0;pointer-events:none}
+.app{position:relative;z-index:1;display:grid;grid-template-columns:210px 1fr;grid-template-rows:38px 1fr;height:100%}
+
+/* заголовок окна */
+.title{grid-column:1/-1;display:flex;align-items:center;-webkit-app-region:drag;border-bottom:1px solid var(--line);padding-left:16px}
+.title b{font-weight:600;letter-spacing:.14em;font-size:12px}
+.title b i{font-style:normal;color:var(--acc)}
+.title .v{margin-left:10px;font-size:11px;color:var(--faint)}
+.title .sp{flex:1}
+.wb{-webkit-app-region:no-drag;width:46px;height:38px;border:0;background:none;color:var(--dim);cursor:pointer;display:grid;place-items:center}
+.wb:hover{background:rgba(255,255,255,.06);color:var(--fg)}
+.wb.x:hover{background:#c42b3a;color:#fff}
+.wb svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:1.3}
+
+/* меню */
+.side{border-right:1px solid var(--line);padding:18px 10px;display:flex;flex-direction:column;gap:2px}
+.side a{display:flex;align-items:center;gap:12px;padding:10px 12px;color:var(--dim);cursor:pointer;border-left:2px solid transparent;transition:.15s}
+.side a svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6}
+.side a:hover{color:var(--fg);background:rgba(255,255,255,.03)}
+.side a.on{color:var(--fg);border-color:var(--acc);background:rgba(102,224,255,.06)}
+.side .sp{flex:1}
+.side .site{font-size:12px;color:var(--faint);padding:10px 12px;cursor:pointer}
+.side .site:hover{color:var(--acc)}
+
+main{overflow:auto;padding:28px 34px 40px;user-select:text}
+main::-webkit-scrollbar{width:8px}main::-webkit-scrollbar-thumb{background:var(--line2)}
+.page{display:none;max-width:780px}.page.on{display:block;animation:in .25s ease}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+h1{font-weight:600;font-size:24px;letter-spacing:.01em;margin-bottom:4px}
+.sub{color:var(--dim);margin-bottom:24px}
+h3{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin:28px 0 12px;display:flex;align-items:center;gap:12px}
+h3::after{content:"";flex:1;height:1px;background:var(--line)}
+
+/* главная */
+.me{display:flex;gap:18px;align-items:center;padding:20px;border:1px solid var(--line);background:var(--panel)}
+.ava{position:relative;width:64px;height:64px;flex:none}
+.ava img{width:100%;height:100%;border-radius:50%;object-fit:cover;background:#111827}
+.ava i{position:absolute;right:0;bottom:0;width:16px;height:16px;border-radius:50%;border:3px solid var(--panel);background:#6b7280}
+.ava i.online{background:#23a55a}.ava i.idle{background:#f0b232}.ava i.dnd{background:#f23f43}
+.me b{display:block;font-size:18px;font-weight:600}
+.me small{color:var(--dim)}
+.pills{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin-top:14px}
+.pill{background:var(--bg);padding:14px 16px;min-width:0}
+.pill em{font-style:normal;display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.pill em::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.pill.ok em::before{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.pill.connecting em::before,.pill.setup em::before{background:var(--warn);animation:bl 1s infinite}
+.pill.error em::before{background:var(--err);box-shadow:0 0 10px var(--err)}
+@keyframes bl{50%{opacity:.3}}
+.pill p{margin-top:6px;font-size:13px;overflow:hidden;text-overflow:ellipsis}
+.pill.error p{color:var(--err)}
+.banner{display:none;align-items:center;gap:14px;padding:14px 16px;border:1px solid var(--acc);background:rgba(102,224,255,.06);margin-bottom:18px}
+.banner.on{display:flex}
+.banner p{flex:1}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.stat{background:var(--bg);padding:16px}
+.stat b{display:block;font-size:26px;font-weight:600}
+.stat small{color:var(--dim);font-size:12px}
+.feed{border:1px solid var(--line)}
+.feed div{display:flex;gap:12px;align-items:center;padding:10px 14px;border-top:1px solid var(--line);font-size:13px}
+.feed div:first-child{border-top:0}
+.feed img{width:22px;height:22px;border-radius:50%}
+.feed time{margin-left:auto;color:var(--faint);font-size:12px}
+.empty{color:var(--faint);padding:14px}
+
+/* кнопки и формы */
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line2);background:none;padding:9px 16px;cursor:pointer;transition:.15s}
+.btn:hover{border-color:var(--acc);color:var(--acc)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#04121a;font-weight:600}
+.btn.pri:hover{filter:brightness(1.1);color:#04121a}
+.fld{display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start;padding:12px 0;border-top:1px solid var(--line)}
+.fld:first-of-type{border-top:0}
+.fld label{padding-top:8px}
+.fld label small{display:block;color:var(--faint);font-size:12px;line-height:1.4;margin-top:2px}
+.fld label a{color:var(--acc);cursor:pointer}
+.inp{display:flex;border:1px solid var(--line2);background:var(--panel);transition:.15s}
+.inp:focus-within{border-color:var(--acc)}
+.inp input,.inp textarea{flex:1;min-width:0;border:0;background:none;padding:9px 12px;outline:none;font-family:Consolas,monospace;font-size:13px}
+.inp textarea{min-height:120px;resize:vertical}
+.inp button{border:0;background:none;color:var(--dim);padding:0 12px;cursor:pointer}
+.inp button:hover{color:var(--acc)}
+.err{color:var(--err);font-size:12px;margin-top:6px;display:none}
+.tg{display:flex;align-items:center;gap:12px;padding:10px 0;cursor:pointer}
+.tg input{display:none}
+.tg span{width:38px;height:20px;border-radius:10px;background:var(--line2);position:relative;transition:.2s;flex:none}
+.tg span::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:.2s}
+.tg input:checked+span{background:var(--acc)}
+.tg input:checked+span::after{left:21px}
+.drop{position:fixed;inset:0;z-index:20;display:none;place-items:center;background:rgba(5,7,13,.88);border:2px dashed var(--acc);font-size:18px}
+.drop.on{display:grid}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;background:#0f1626;border:1px solid var(--acc);padding:11px 18px;transition:.3s;z-index:30;pointer-events:none;max-width:80%}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast.bad{border-color:var(--err)}
+.logs{font:12px/1.6 Consolas,monospace;color:#b9c6d8;border:1px solid var(--line);background:var(--panel);padding:12px 14px;height:calc(100vh - 210px);overflow:auto;white-space:pre-wrap;word-break:break-word}
+.logs::-webkit-scrollbar{width:8px}.logs::-webkit-scrollbar-thumb{background:var(--line2)}
+.guests{display:flex;flex-wrap:wrap;gap:12px}
+.g{width:46px;height:46px;border-radius:50%;padding:2px;background:conic-gradient(from var(--a,0deg),#66e0ff,#a78bfa,#ff6bcb,#ffd36b,#66e0ff);animation:spin 4s linear infinite}
+.g img{width:100%;height:100%;border-radius:50%;object-fit:cover;border:2px solid var(--bg);display:block;background:#111827}
+@property --a{syntax:"<angle>";inherits:false;initial-value:0deg}
+@keyframes spin{to{--a:360deg}}
+</style>
+</head>
+<body>
+<canvas id="dust"></canvas>
+<div class="app">
+  <div class="title"><b>CYBER<i>SITE</i></b><span class="v" id="ver"></span><span class="sp"></span>
+    <button class="wb" data-w="min" title="Свернуть"><svg viewBox="0 0 10 10"><path d="M1 5h8"/></svg></button>
+    <button class="wb" data-w="max" title="Развернуть"><svg viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8"/></svg></button>
+    <button class="wb x" data-w="close" title="Свернуть в трей"><svg viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8"/></svg></button>
+  </div>
+  <nav class="side">
+    <a data-p="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Главная</a>
+    <a data-p="guests"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4a4 4 0 0 1 0 8M22 21c0-3-2-5-4-5.5"/></svg>Гости</a>
+    <a data-p="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Настройки</a>
+    <a data-p="logs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Журнал</a>
+    <span class="sp"></span>
+    <span class="site" id="openSite">severeclaw.github.io ↗</span>
+  </nav>
+
+  <main>
+    <!-- ГЛАВНАЯ -->
+    <section class="page on" id="p-home">
+      <div class="banner" id="upd"><p id="updText"></p><button class="btn pri" id="updBtn">Обновить сейчас</button></div>
+      <div class="banner" id="setupBanner"><p>Бот ещё не настроен. Заполни настройки или перетащи сюда старый <b>config.json</b> — всё перенесётся само.</p><button class="btn pri" data-go="settings">Настроить</button></div>
+      <div class="me">
+        <div class="ava"><img id="av" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""><i id="st"></i></div>
+        <div><b id="nm">SevereClaw</b><small id="line">ждём бота…</small></div>
+      </div>
+      <div class="pills">
+        <div class="pill" id="pDiscord"><em>Discord</em><p>—</p></div>
+        <div class="pill" id="pGist"><em>GitHub</em><p>—</p></div>
+        <div class="pill" id="pNtfy"><em>Сайт</em><p>—</p></div>
+      </div>
+      <div class="btns">
+        <button class="btn" id="restart">↻ Перезапустить бота</button>
+        <button class="btn" data-go="logs">Открыть журнал</button>
+      </div>
+      <h3>Гости сегодня</h3>
+      <div class="stats">
+        <div class="stat"><b id="sToday">0</b><small>сегодня</small></div>
+        <div class="stat"><b id="sTotal">0</b><small>всего</small></div>
+        <div class="stat"><b id="sGuests">0</b><small>отметились</small></div>
+      </div>
+      <h3>Последние заходы</h3>
+      <div class="feed" id="feedHome"></div>
+    </section>
+
+    <!-- ГОСТИ -->
+    <section class="page" id="p-guests">
+      <h1>Гости</h1><p class="sub">Кто заходил на сайт. Аватарки — только у тех, кто сам отметился.</p>
+      <div class="guests" id="gl"></div>
+      <h3>Откуда сегодня</h3>
+      <div class="feed" id="srcList"></div>
+      <h3>Заходы с момента запуска</h3>
+      <div class="feed" id="feedAll"></div>
+    </section>
+
+    <!-- НАСТРОЙКИ -->
+    <section class="page" id="p-settings">
+      <h1>Настройки</h1><p class="sub">Хранятся в папке программы и не сбрасываются при обновлении. Старый <b>config.json</b> можно просто перетащить в окно.</p>
+      <div class="btns" style="margin:0 0 6px">
+        <button class="btn" id="imp">⤓ Перенести из config.json</button>
+        <button class="btn" id="exp">⤒ Сохранить копию настроек</button>
+        <button class="btn" id="openData">Папка с настройками</button>
+      </div>
+
+      <h3>Discord</h3>
+      <div class="fld"><label>Токен бота<small><a data-url="https://discord.com/developers/applications">Developer Portal</a> → Bot → Reset Token</small></label><div><div class="inp"><input type="password" id="discordToken" spellcheck="false"><button data-eye="discordToken">👁</button></div><div class="err" id="e-discordToken"></div></div></div>
+      <div class="fld"><label>ID сервера<small>ПКМ по серверу → Копировать ID сервера</small></label><div class="inp"><input id="guildId" spellcheck="false"></div></div>
+      <div class="fld"><label>Канал для гостей<small>ПКМ по каналу → Копировать ID канала. Пусто — не писать в Discord</small></label><div class="inp"><input id="logChannelId" spellcheck="false"></div></div>
+
+      <h3>GitHub</h3>
+      <div class="fld"><label>Токен GitHub<small><a data-url="https://github.com/settings/tokens/new?scopes=gist&description=CyberSite">Создать токен</a> (classic, галочка gist)</small></label><div class="inp"><input type="password" id="githubToken" spellcheck="false"><button data-eye="githubToken">👁</button></div></div>
+
+      <h3>Отметки гостей</h3>
+      <div class="fld"><label>Discord Client Secret<small>Developer Portal → OAuth2. Там же добавь Redirect <b>https://severeclaw.github.io/</b></small></label><div class="inp"><input type="password" id="discordClientSecret" spellcheck="false"><button data-eye="discordClientSecret">👁</button></div></div>
+      <div class="fld"><label>Токен Telegram-бота<small>@BotFather → /newbot, потом /setdomain → severeclaw.github.io</small></label><div class="inp"><input type="password" id="telegramBotToken" spellcheck="false"><button data-eye="telegramBotToken">👁</button></div></div>
+      <div class="fld"><label>Имя Telegram-бота<small>без @</small></label><div class="inp"><input id="telegramBotName" spellcheck="false"></div></div>
+
+      <h3>Люди на сайте</h3>
+      <div class="fld"><label>Твой Discord ID</label><div class="inp"><input id="ownerId" spellcheck="false"></div></div>
+      <div class="fld"><label>Друзья<small>Discord ID, по одному в строке</small></label><div class="inp"><textarea id="friends" spellcheck="false"></textarea></div></div>
+
+      <h3>Программа</h3>
+      <label class="tg"><input type="checkbox" id="autostart"><span></span>Запускать вместе с Windows</label>
+      <label class="tg"><input type="checkbox" id="startHidden"><span></span>При автозапуске сразу сворачивать в трей</label>
+
+      <div class="btns" style="margin-top:24px"><button class="btn pri" id="save">Сохранить и перезапустить бота</button></div>
+    </section>
+
+    <!-- ЖУРНАЛ -->
+    <section class="page" id="p-logs">
+      <h1>Журнал</h1><p class="sub">Что делает бот. Если что-то не работает — скопируй отсюда.</p>
+      <div class="logs" id="logs"></div>
+      <div class="btns"><button class="btn" id="copyLogs">Скопировать всё</button></div>
+    </section>
+  </main>
+</div>
+<div class="drop" id="drop">Отпусти, чтобы перенести настройки из config.json</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+function toast(t, bad){ const el=$('toast'); el.textContent=t; el.className='toast on'+(bad?' bad':''); clearTimeout(toast.h); toast.h=setTimeout(()=>el.className='toast',4500); }
+const ST = {online:"в сети", idle:"отошёл", dnd:"не беспокоить", offline:"не в сети"};
+const SRC = { tg:"Telegram", ds:"Discord", yt:"YouTube", steam:"Steam", gh:"GitHub", search:"поиск", direct:"напрямую", other:"другие сайты" };
+const FIELDS = ['discordToken','guildId','logChannelId','githubToken','discordClientSecret','telegramBotToken','telegramBotName','ownerId'];
+
+/* навигация */
+function go(p){ document.querySelectorAll('.side a').forEach(a => a.classList.toggle('on', a.dataset.p===p));
+  document.querySelectorAll('.page').forEach(s => s.classList.toggle('on', s.id==='p-'+p));
+  if (p==='logs') $('logs').scrollTop = 1e9; }
+document.querySelectorAll('.side a').forEach(a => a.onclick = () => go(a.dataset.p));
+document.addEventListener('click', e => {
+  const g = e.target.closest('[data-go]'); if (g) go(g.dataset.go);
+  const u = e.target.closest('[data-url]'); if (u) cs.open(u.dataset.url);
+  const w = e.target.closest('[data-w]'); if (w) cs.win(w.dataset.w);
+  const eye = e.target.closest('[data-eye]'); if (eye){ const i=$(eye.dataset.eye); i.type = i.type==='password' ? 'text' : 'password'; }
+});
+
+/* настройки */
+let CFG = {};
+function fill(c){
+  CFG = c || {};
+  for (const k of FIELDS) $(k).value = CFG[k] || '';
+  $('friends').value = (CFG.friends||[]).join('\n');
+  $('autostart').checked = CFG.autostart !== false;
+  $('startHidden').checked = CFG.startHidden !== false;
+}
+function collect(){
+  const c = {};
+  for (const k of FIELDS) c[k] = $(k).value.trim();
+  c.friends = $('friends').value.split(/[\s,;]+/).map(s => s.replace(/\D/g,'')).filter(s => s.length >= 17);
+  c.autostart = $('autostart').checked; c.startHidden = $('startHidden').checked;
+  return c;
+}
+$('save').onclick = async () => {
+  const r = await cs.save(collect()); fill(r.cfg);
+  $('e-discordToken').style.display = r.warn ? 'block' : 'none'; $('e-discordToken').textContent = r.warn || '';
+  if (r.warn) toast(r.warn, true); else { toast('Сохранено, бот перезапускается'); go('home'); }
+};
+async function doImport(file){
+  const r = await cs.importConfig(file);
+  if (r.ok){ fill(r.cfg); toast('Настройки перенесены'); go('home'); }
+  else if (r.error) toast(r.error, true);
+}
+$('imp').onclick = () => doImport();
+$('exp').onclick = async () => { const r = await cs.exportConfig(); if (r.ok) toast('Сохранил копию: ' + r.file); };
+$('openData').onclick = () => cs.openData();
+$('restart').onclick = () => { cs.restart(); toast('Перезапускаю бота'); };
+$('openSite').onclick = () => cs.open(CFG.siteUrl || 'https://severeclaw.github.io/');
+$('updBtn').onclick = () => cs.installUpdate();
+$('copyLogs').onclick = () => { navigator.clipboard.writeText($('logs').textContent); toast('Скопировано'); };
+
+/* перетаскивание config.json */
+let dragN = 0;
+addEventListener('dragenter', e => { e.preventDefault(); dragN++; $('drop').classList.add('on'); });
+addEventListener('dragleave', e => { if (--dragN <= 0){ dragN=0; $('drop').classList.remove('on'); } });
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => { e.preventDefault(); dragN=0; $('drop').classList.remove('on');
+  const f = e.dataTransfer.files[0]; if (f) doImport(cs.pathOf(f)); });
+
+/* состояние */
+const ago = t => { const s=(Date.now()-t)/1000; return s<60?'только что':s<3600?Math.round(s/60)+' мин':Math.round(s/3600)+' ч'; };
+function pill(id, v){ const el=$(id); el.className='pill '+(v?.state||''); el.querySelector('p').textContent = v?.text || '—'; el.title = v?.text || ''; }
+function feed(list, n){ return list.length ? list.slice(0,n).map(v => `<div>${v.avatar?`<img src="${esc(v.avatar)}" alt="">`:''}<span>${esc(v.text)}</span><time>${ago(v.time)}</time></div>`).join('') : '<div class="empty">Пока никого.</div>'; }
+function render(s){
+  pill('pDiscord', s.discord); pill('pGist', s.gist); pill('pNtfy', s.ntfy);
+  $('setupBanner').classList.toggle('on', s.discord?.state === 'setup');
+  const u = s.owner?.user;
+  if (u){ const du=u.discord_user; $('nm').textContent = du.global_name || du.username;
+    $('av').src = du.avatar ? `https://cdn.discordapp.com/avatars/${du.id}/${du.avatar}.png?size=128` : 'https://cdn.discordapp.com/embed/avatars/0.png';
+    $('st').className = u.discord_status; }
+  $('line').textContent = s.owner?.line ? s.owner.line.replace(/^(online|idle|dnd|offline)/, m => ST[m]) : (s.discord?.state==='ok' ? 'бот работает' : 'ждём бота…');
+  const v = s.visitors;
+  if (v){ $('sToday').textContent = v.stats.today; $('sTotal').textContent = v.stats.total; $('sGuests').textContent = v.guests.length;
+    $('gl').innerHTML = v.guests.length ? v.guests.map(g => `<div class="g" title="${esc(g.name)}" style="animation-delay:-${(Math.random()*4).toFixed(2)}s"><img src="${esc(g.avatar||'')}" alt=""></div>`).join('') : '<div class="empty">Никто ещё не отметился.</div>';
+    const src = Object.entries(v.stats.bySourceToday||{}).sort((a,b)=>b[1]-a[1]);
+    $('srcList').innerHTML = src.length ? src.map(([k,n]) => `<div><span>${esc(SRC[k]||k)}</span><time>${n}</time></div>`).join('') : '<div class="empty">Сегодня пока никого.</div>';
+  }
+  $('feedHome').innerHTML = feed(s.visits||[], 6);
+  $('feedAll').innerHTML = feed(s.visits||[], 50);
+  const up = s.update;
+  $('upd').classList.toggle('on', !!up);
+  if (up){ $('updText').textContent = up.state==='ready' ? `Скачана новая версия ${up.version}.` : `Скачиваю версию ${up.version}… ${up.percent||0}%`;
+    $('updBtn').style.display = up.state==='ready' ? '' : 'none'; }
+}
+function addLog(l){ const el=$('logs'); const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  el.textContent += (el.textContent ? '\n' : '') + l; if (stick) el.scrollTop = 1e9; }
+
+cs.get().then(d => {
+  $('ver').textContent = 'v' + d.version;
+  fill(d.cfg || d.defaults);
+  $('logs').textContent = d.logs.join('\n');
+  render(d.state);
+  if (d.state.imported) toast('Нашёл старые настройки и перенёс их');
+  if (!d.cfg) go('settings');
+});
+cs.onState(render);
+cs.onLog(addLog);
+setInterval(() => cs.get().then(d => render(d.state)), 30000);
+
+/* частички */
+(function(){
+  const c=$('dust'), x=c.getContext('2d'); let W,H,ps=[];
+  const dpr=Math.min(2,devicePixelRatio||1);
+  const mk=a=>({x:Math.random()*W,y:a?Math.random()*H:H+8,r:Math.random()*1.4+.3,vy:-(Math.random()*.2+.04),vx:(Math.random()-.5)*.06,a:Math.random()*.5+.1,t:Math.random()*6.3,ts:Math.random()*.02+.005});
+  function size(){ W=innerWidth;H=innerHeight;c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';x.setTransform(dpr,0,0,dpr,0,0);
+    const n=Math.round(W*H/16000); while(ps.length<n) ps.push(mk(true)); ps.length=n; }
+  addEventListener('resize',size); size();
+  (function f(){ if(!document.hidden){ x.clearRect(0,0,W,H);
+    for(const p of ps){ p.y+=p.vy;p.x+=p.vx;p.t+=p.ts; if(p.y<-8) Object.assign(p,mk(false));
+      x.beginPath();x.arc(p.x,p.y,p.r,0,6.283);x.fillStyle=`rgba(150,225,255,${p.a*(.55+.45*Math.sin(p.t))})`;x.fill(); } }
+    requestAnimationFrame(f); })();
+})();
+</script>
+</body>
+</html>
