@@ -189,6 +189,8 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
     <section class="page" id="p-guests">
       <h1>Гости</h1><p class="sub">Кто заходил на сайт. Аватарки — только у тех, кто сам отметился.</p>
       <div class="guests" id="gl"></div>
+      <h3>Кто они тебе</h3>
+      <div class="stats" id="whoStats"></div>
       <h3>Откуда сегодня</h3>
       <div class="feed" id="srcList"></div>
       <h3>Заходы с момента запуска</h3>
@@ -389,6 +391,8 @@ function render(s){
   const v = s.visitors;
   if (v){ $('sToday').textContent = v.stats.today; $('sTotal').textContent = v.stats.total; $('sGuests').textContent = v.guests.length;
     $('gl').innerHTML = v.guests.length ? v.guests.map(g => `<div class="g" title="${esc(g.name)}" style="animation-delay:-${(Math.random()*4).toFixed(2)}s"><img src="${esc(g.avatar||'')}" alt=""></div>`).join('') : '<div class="empty">Никто ещё не отметился.</div>';
+    const w = v.stats.who || {};
+    $('whoStats').innerHTML = [['friend','друзья'],['acq','знакомые'],['stranger','незнакомцы']].map(([k,l]) => `<div class="stat"><b>${w[k]||0}</b><small>${l}</small></div>`).join('');
     const src = Object.entries(v.stats.bySourceToday||{}).sort((a,b)=>b[1]-a[1]);
     $('srcList').innerHTML = src.length ? src.map(([k,n]) => `<div><span>${esc(SRC[k]||k)}</span><time>${n}</time></div>`).join('') : '<div class="empty">Сегодня пока никого.</div>';
   }

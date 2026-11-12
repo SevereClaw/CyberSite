@@ -240,7 +240,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
 
   // ---------- гости ----------
   const VIS_PATH = path.join(dataDir, 'visitors-data.json');
-  let vis = { total: 0, days: {}, srcDays: {}, guests: [] };
+  let vis = { total: 0, days: {}, srcDays: {}, guests: [], who: {} };
   try { vis = Object.assign(vis, JSON.parse(fs.readFileSync(VIS_PATH, 'utf8'))); } catch (e) {}
   const today = () => new Date().toLocaleDateString('sv-SE');      // 2026-11-11, по времени ноутбука
   let visDirty = true;
@@ -249,7 +249,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     const d = today();
     return JSON.stringify({
       updated: Date.now(),
-      stats: { total: vis.total, today: vis.days[d] || 0, bySourceToday: vis.srcDays[d] || {} },
+      stats: { total: vis.total, today: vis.days[d] || 0, bySourceToday: vis.srcDays[d] || {}, who: vis.who || {} },
       guests: vis.guests.slice(0, 60),
     });
   }
@@ -378,6 +378,24 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     emit('visit', { text: `Зашли ${SRC_RU[src]} · ${dev}${m.back ? ' · уже был' : ''}`, time: Date.now() });
   }
 
+  const WHO_RU = { friend: 'Друг', acq: 'Знакомый', stranger: 'Незнакомец' };
+  const WHO_EMO = { friend: '🫂', acq: '🤝', stranger: '👤' };
+  const answered = new Set();
+  function onWho(m) {
+    if (!WHO_RU[m.a]) return;
+    const key = String(m.vid || '').slice(0, 20);
+    if (key && answered.has(key)) return;            // один ответ с одного браузера за запуск
+    if (key) answered.add(key);
+    vis.who = vis.who || {};
+    vis.who[m.a] = (vis.who[m.a] || 0) + 1;
+    saveVis();
+    const src = SRC_RU[m.src] ? SRC_RU[m.src] : '';
+    const dev = DEV_OK.includes(m.dev) ? m.dev : '';
+    say(`${WHO_EMO[m.a]} Новый гость${src ? ' ' + src : ''}${dev ? ' · ' + dev : ''} ответил, кто он тебе: **${WHO_RU[m.a]}**`);
+    log(`Опрос: ${WHO_RU[m.a]}`);
+    emit('visit', { text: `Ответил на опрос: ${WHO_RU[m.a]}`, time: Date.now() });
+  }
+
   function addGuest(g) {
     vis.guests = [g, ...vis.guests.filter(x => !(x.via === g.via && x.id === g.id))].slice(0, 100);
     saveVis();
@@ -451,6 +469,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
             if (cfg.ntfySince !== ev.id) { cfg.ntfySince = ev.id; saveCfg(); }
             let m; try { m = JSON.parse(ev.message); } catch (e) { continue; }
             if (m.t === 'visit') onVisit(m);
+            else if (m.t === 'who') onWho(m);
             else if (m.t === 'login' && m.via === 'discord') onDiscordLogin(m.code);
             else if (m.t === 'login' && m.via === 'telegram') onTelegramLogin(m.user);
           }
