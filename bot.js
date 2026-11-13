@@ -102,7 +102,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     let line;
     if (!u) line = 'тебя нет на сервере — статус не виден';
     else if (!u.activities.length) line = `${u.discord_status}, Discord не передаёт ни одной активности`;
-    else line = u.discord_status + ' | ' + u.activities.map(a => `${KIND_RU[a.type] || a.type}: ${a.type === 4 ? a.state : a.name}`).join(' | ');
+    else line = u.discord_status + ' | ' + u.activities.map(a => `${KIND_RU[a.type] || a.type}: ${a.type === 4 ? a.state : a.name}${a.source === 'steam' ? ' (из Steam)' : ''}`).join(' | ');
     if (line !== lastOwnerLine) { lastOwnerLine = line; log('Ты сейчас:', line); emit('owner', { line, user: u || null }); }
   }
 
@@ -217,6 +217,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     act.lastTick = now;
     const m = guild && guild.members.cache.get(cfg.ownerId);
     const games = (hide().all || hide().games) ? [] : (m && m.presence ? m.presence.activities : []).filter(a => a.type === 0 && !isIgnored(a)).map(a => a.name);
+    { const sa = steamActivity(); if (sa && !games.length) games.push(sa.name); }
     const d = new Date().toLocaleDateString('sv-SE');
     if (games.length && delta) {
       const day = act.games.days[d] = act.games.days[d] || {};
@@ -304,6 +305,45 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
 
   // ---------- Steam: во что играл за 2 недели (открытый профиль ?xml=1, без ключа) ----------
   let steamTimer = null;
+  // Игра «прямо сейчас» из профиля Steam — на случай, если Discord её не показывает.
+  let steamNow = null, steamNowTimer = null;
+  async function fetchSteamNow() {
+    const id = String(cfg.steam || '').trim().replace(/^https?:\/\/steamcommunity\.com\/(id|profiles)\//i, '').replace(/\/.*$/, '');
+    if (!id || id === 'off') { steamNow = null; return; }
+    try {
+      const path_ = /^\d{17}$/.test(id) ? `profiles/${id}` : `id/${id}`;
+      const r = await fetch(`https://steamcommunity.com/${path_}/?xml=1&t=${Date.now()}`, { signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!r.ok) throw new Error('Steam ' + r.status);
+      const xml = await r.text();
+      const info = (xml.match(/<inGameInfo>([\s\S]*?)<\/inGameInfo>/) || [])[1];
+      const name = info && ((info.match(/<gameName>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/gameName>/) || [])[1] || '').trim();
+      const appid = info && ((info.match(/app\/(\d+)/) || [])[1] || null);
+      const was = steamNow && steamNow.name;
+      if (name) {
+        if (was !== name) {
+          steamNow = { name, appid, since: Date.now() };
+          log(`Steam: сейчас играешь в «${name}»${appid ? ' (app ' + appid + ')' : ''}`);
+          schedule();
+        }
+      } else if (was) { steamNow = null; log('Steam: вышел из игры'); schedule(); }
+    } catch (e) { if (steamNow) log('Steam (сейчас): не получилось —', e.message); }
+  }
+  function steamActivity() {
+    if (!steamNow || hide().all || hide().games) return null;
+    const a = { type: 0, name: steamNow.name, details: null, state: null, application_id: null, source: 'steam',
+      timestamps: { start: steamNow.since }, assets: null };
+    if (isIgnored(a)) return null;
+    const own = artCache.get(steamNow.name);
+    if (!own && !artCache.has(steamNow.name)) lookupArt(steamNow.name);
+    a.art = steamNow.appid ? {
+      appid: +steamNow.appid,
+      hero: `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${steamNow.appid}/library_hero.jpg`,
+      header: `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${steamNow.appid}/header.jpg`,
+      background: (own && own.background) || null,
+    } : (own || null);
+    return a;
+  }
+
   async function fetchSteam() {
     const id = String(cfg.steam || '').trim().replace(/^https?:\/\/steamcommunity\.com\/(id|profiles)\//i, '').replace(/\/.*$/, '');
     if (!id || id === 'off') { if (act.steam) { act.steam = null; actDirty = true; schedule(); } return; }
@@ -506,6 +546,12 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     const users = buildUsers();
     logOwner(users);
     if (users[cfg.ownerId]) users[cfg.ownerId] = privacy(users[cfg.ownerId]);
+    {
+      const sa = steamActivity(), u = users[cfg.ownerId];
+      if (sa && u && !u.activities.some(a => a.type === 0 && a.name.toLowerCase() === sa.name.toLowerCase())) {
+        if (!u.activities.some(a => a.type === 0)) u.activities.push(sa);
+      }
+    }
     trackMusic(users[cfg.ownerId]);
     emit('people', { users, friends: friendList(), hide: hide() });
     const voice = voiceInfo();
@@ -744,6 +790,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     ytTimer = setInterval(fetchYouTube, 30 * 60_000); setTimeout(fetchYouTube, 8_000);
     tgTimer = setInterval(fetchTelegram, 20 * 60_000); setTimeout(fetchTelegram, 12_000);
     steamTimer = setInterval(fetchSteam, 30 * 60_000); setTimeout(fetchSteam, 16_000);
+    steamNowTimer = setInterval(fetchSteamNow, 90_000); setTimeout(fetchSteamNow, 6_000);
     commitsTimer = setInterval(fetchCommits, 20 * 60_000); setTimeout(fetchCommits, 20_000);
     listen();
   });
@@ -783,6 +830,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     clearInterval(ytTimer);
     clearInterval(tgTimer);
     clearInterval(steamTimer);
+    clearInterval(steamNowTimer);
     clearInterval(commitsTimer);
     try { gameTick(); } catch (e) {}
     clearTimeout(timer);
