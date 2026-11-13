@@ -235,6 +235,10 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
       <h3>YouTube</h3>
       <div class="fld"><label>Канал на сайте<small>@ник или ID канала. Последние ролики показываются на сайте, проверка раз в 30 минут. <b>off</b> — не показывать</small></label><div class="inp"><input id="youtube" spellcheck="false"></div></div>
 
+      <h3>Telegram и Steam</h3>
+      <div class="fld"><label>Каналы Telegram<small>Публичные каналы, по одному в строке (@ник или ссылка t.me/…). На сайте — последний пост каждого. Проверка раз в 20 минут. Каналы по приглашению не видны</small></label><div class="inp"><textarea id="telegram" spellcheck="false" style="min-height:70px"></textarea></div></div>
+      <div class="fld"><label>Профиль Steam<small>Ник из ссылки steamcommunity.com/id/<b>ник</b> или 17-значный ID. Профиль и «Игровая информация» должны быть открыты. <b>off</b> — не показывать</small></label><div class="inp"><input id="steam" spellcheck="false"></div></div>
+
       <h3>Игры</h3>
       <div class="fld"><label>Не считать играми<small>Программы, которые Discord принимает за игры. По одной в строке, как в журнале после «Играет:»</small></label><div class="inp"><textarea id="ignoreGames" spellcheck="false" style="min-height:90px"></textarea></div></div>
 
@@ -264,7 +268,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt
 function toast(t, bad){ const el=$('toast'); el.textContent=t; el.className='toast on'+(bad?' bad':''); clearTimeout(toast.h); toast.h=setTimeout(()=>el.className='toast',4500); }
 const ST = {online:"в сети", idle:"отошёл", dnd:"не беспокоить", offline:"не в сети"};
 const SRC = { tg:"Telegram", ds:"Discord", yt:"YouTube", steam:"Steam", gh:"GitHub", search:"поиск", direct:"напрямую", other:"другие сайты" };
-const FIELDS = ['youtube','discordToken','guildId','logChannelId','githubToken','discordClientSecret','telegramBotToken','telegramBotName','ownerId'];
+const FIELDS = ['youtube','steam','discordToken','guildId','logChannelId','githubToken','discordClientSecret','telegramBotToken','telegramBotName','ownerId'];
 
 /* куда сообщать о гостях */
 let NOTIFY = 'dm';
@@ -294,6 +298,7 @@ function fill(c){
   $('startHidden').checked = CFG.startHidden !== false;
   $('autoUpdate').checked = CFG.autoUpdate !== false;
   $('ignoreGames').value = (CFG.ignoreGames || []).join('\n');
+  $('telegram').value = (Array.isArray(CFG.telegram) ? CFG.telegram : String(CFG.telegram || '').split(/[\s,]+/)).filter(Boolean).join('\n');
   setNotify(CFG.notify || 'dm');
 }
 function collect(){
@@ -301,6 +306,7 @@ function collect(){
   for (const k of FIELDS) c[k] = $(k).value.trim();
   c.autostart = $('autostart').checked; c.startHidden = $('startHidden').checked; c.autoUpdate = $('autoUpdate').checked;
   c.notify = NOTIFY;
+  c.telegram = $('telegram').value.split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
   c.ignoreGames = $('ignoreGames').value.split('\n').map(x => x.trim()).filter(Boolean);
   return c;
 }

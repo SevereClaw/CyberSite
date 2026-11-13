@@ -52,7 +52,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   const hhmm = t => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildPresences],
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildPresences, GatewayIntentBits.GuildVoiceStates],
   });
 
   const ms = d => (d ? new Date(d).getTime() : undefined);
@@ -234,9 +234,100 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     }
     const used = new Set(days.flatMap(x => Object.keys(x.games)));
     const art = Object.fromEntries(Object.entries(act.games.art).filter(([k]) => used.has(k)));
-    return JSON.stringify({ updated: Date.now(), music: { day: act.music.day, tracks: act.music.tracks.map(({ key, ...t }) => t) }, games: { days, art }, youtube: act.youtube || null });
+    return JSON.stringify({ updated: Date.now(), music: { day: act.music.day, tracks: act.music.tracks.map(({ key, ...t }) => t) }, games: { days, art }, youtube: act.youtube || null, telegram: act.telegram || null, steam: act.steam || null });
   }
   let gameTimer = null;
+
+  // ---------- голосовой канал ----------
+  // На сайт попадают только ты и друзья из списка; остальные — числом, без ников.
+  let voiceSince = 0, voiceChan = null;
+  function voiceInfo() {
+    const m = guild && guild.members.cache.get(cfg.ownerId);
+    const ch = m && m.voice && m.voice.channel;
+    if (!ch) { voiceChan = null; voiceSince = 0; return null; }
+    if (voiceChan !== ch.id) { voiceChan = ch.id; voiceSince = Date.now(); }
+    if (hide().all) return null;
+    const known = new Set(IDS);
+    const names = Object.fromEntries(friendList().map(f => [String(f.id), f.name]));
+    const all = [...ch.members.values()];
+    const people = all.filter(x => known.has(x.id)).map(x => ({
+      id: x.id, name: names[x.id] || x.user.globalName || x.user.username, avatar: x.user.avatar || null, me: x.id === cfg.ownerId,
+      mute: !!(x.voice.selfMute || x.voice.serverMute), deaf: !!(x.voice.selfDeaf || x.voice.serverDeaf),
+      stream: !!x.voice.streaming, video: !!x.voice.selfVideo,
+    })).sort((a, b) => b.me - a.me);
+    return { channel: ch.name, since: voiceSince, people, others: all.length - people.length };
+  }
+
+  // ---------- Telegram: последний пост публичных каналов (страница t.me/s, без ключей) ----------
+  let tgTimer = null;
+  const tgChannels = () => (Array.isArray(cfg.telegram) ? cfg.telegram : String(cfg.telegram || '').split(/[\s,]+/))
+    .map(c => String(c).trim().replace(/^https?:\/\/t\.me\/(s\/)?/i, '').replace(/^@/, '').replace(/\/.*$/, '')).filter(c => /^\w{4,}$/.test(c));
+  const unhtml = t => String(t || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n)).trim();
+  async function fetchTelegram() {
+    const list = tgChannels();
+    if (!list.length) { if (act.telegram) { act.telegram = null; actDirty = true; schedule(); } return; }
+    const out = [];
+    for (const c of list) {
+      try {
+        const r = await fetch(`https://t.me/s/${c}`, { signal: AbortSignal.timeout(20_000), headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'ru' } });
+        if (!r.ok) throw new Error('t.me ' + r.status);
+        const html = await r.text();
+        const title = unhtml((html.match(/<div class="tgme_channel_info_header_title"[^>]*>([\s\S]*?)<\/div>/) || [])[1]);
+        const avatar = (html.match(/<i class="tgme_page_photo_image[^"]*"[^>]*><img src="([^"]+)"/) || [])[1] || null;
+        const blocks = html.split('<div class="tgme_widget_message_wrap').slice(1);
+        const posts = blocks.map(b => {
+          const id = (b.match(/data-post="([^"]+)"/) || [])[1];
+          const textHtml = (b.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/) || [])[1];
+          const photo = (b.match(/tgme_widget_message_(?:photo_wrap|video_thumb)[^>]*style="[^"]*background-image:url\('([^']+)'\)/) || [])[1] || null;
+          const date = Date.parse((b.match(/<time datetime="([^"]+)"/) || [])[1]) || null;
+          const views = (b.match(/<span class="tgme_widget_message_views">([^<]+)/) || [])[1] || null;
+          let text = unhtml(textHtml);
+          if (text.length > 420) text = text.slice(0, 400).replace(/\s+\S*$/, '') + '…';
+          return { id, text, photo, date, views, url: id ? `https://t.me/${id}` : `https://t.me/${c}` };
+        }).filter(p => p.id && (p.text || p.photo));
+        if (posts.length) out.push({ channel: c, title: title || '@' + c, avatar, post: posts[posts.length - 1] });
+      } catch (e) { log(`Telegram @${c}: не получилось —`, e.message); }
+    }
+    if (!out.length) return;
+    out.sort((a, b) => (b.post.date || 0) - (a.post.date || 0));
+    const was = JSON.stringify(act.telegram);
+    act.telegram = out;
+    if (JSON.stringify(out) !== was) { log(`Telegram: последний пост в @${out[0].channel}`); actDirty = true; saveAct(); schedule(); }
+  }
+
+  // ---------- Steam: во что играл за 2 недели (открытый профиль ?xml=1, без ключа) ----------
+  let steamTimer = null;
+  async function fetchSteam() {
+    const id = String(cfg.steam || '').trim().replace(/^https?:\/\/steamcommunity\.com\/(id|profiles)\//i, '').replace(/\/.*$/, '');
+    if (!id || id === 'off') { if (act.steam) { act.steam = null; actDirty = true; schedule(); } return; }
+    try {
+      const path_ = /^\d{17}$/.test(id) ? `profiles/${id}` : `id/${id}`;
+      const r = await fetch(`https://steamcommunity.com/${path_}/?xml=1&l=russian`, { signal: AbortSignal.timeout(20_000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!r.ok) throw new Error('Steam ' + r.status);
+      const xml = await r.text();
+      const tag = (src, t) => { const m = src.match(new RegExp(`<${t}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${t}>`)); return m ? m[1].trim() : ''; };
+      if (tag(xml, 'privacyState') && tag(xml, 'privacyState') !== 'public') throw new Error('профиль Steam закрыт — открой его в настройках приватности');
+      const games = [...xml.matchAll(/<mostPlayedGame>([\s\S]*?)<\/mostPlayedGame>/g)].map(([, g]) => {
+        const link = tag(g, 'gameLink'); const appid = (link.match(/app\/(\d+)/) || [])[1] || null;
+        const num = v => {               // «1,234» — тысячи, «12,5» — дробь, «1 234,5» — тоже
+          let t = String(v).replace(/[\s\u00a0]/g, '');
+          if (/,\d{3}(\D|$)/.test(t) && !/,\d{1,2}$/.test(t)) t = t.replace(/,/g, ''); else t = t.replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+          return parseFloat(t.replace(/[^\d.]/g, '')) || 0;
+        };
+        return { name: tag(g, 'gameName'), appid, h2w: num(tag(g, 'hoursPlayed')), total: num(tag(g, 'hoursOnRecord')),
+          img: appid ? `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appid}/header.jpg` : (tag(g, 'gameLogo') || null) };
+      }).filter(g => g.name);
+      const steam = { profile: `https://steamcommunity.com/${path_}`, name: tag(xml, 'steamID'), level: null,
+        state: tag(xml, 'onlineState'), stateText: unhtml(tag(xml, 'stateMessage')), games, checked: Date.now() };
+      const was = JSON.stringify(act.steam && act.steam.games);
+      act.steam = steam;
+      if (JSON.stringify(games) !== was) {
+        log(games.length ? `Steam: за 2 недели — ${games.map(g => `${g.name} ${g.h2w} ч`).join(', ')}` : 'Steam: за 2 недели игр нет (или скрыты «Игровые данные» в приватности)');
+        actDirty = true; saveAct(); schedule();
+      }
+    } catch (e) { log('Steam: не получилось —', e.message); }
+  }
 
   // ---------- YouTube: последние ролики канала (лента RSS, без ключей) ----------
   let ytTimer = null;
@@ -335,9 +426,10 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     if (users[cfg.ownerId]) users[cfg.ownerId] = privacy(users[cfg.ownerId]);
     trackMusic(users[cfg.ownerId]);
     emit('people', { users, friends: friendList(), hide: hide() });
-    const usersJson = JSON.stringify(users);
+    const voice = voiceInfo();
+    const usersJson = JSON.stringify([users, voice]);
     if (!force && usersJson === lastUsersJson && !visDirty && !actDirty) return;
-    const files = { [FILE]: JSON.stringify({ updated: Date.now(), bot: online, site: siteInfo(), users }) };
+    const files = { [FILE]: JSON.stringify({ updated: Date.now(), bot: online, site: siteInfo(), users, voice: online ? voice : null }) };
     if (visDirty || force) files[VFILE] = visitorsFile();
     if (actDirty || force) files[AFILE] = activityFile();
     try {
@@ -568,9 +660,16 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     hbTimer = setInterval(() => publish(true), HEARTBEAT);
     gameTimer = setInterval(gameTick, 60_000); gameTick();
     ytTimer = setInterval(fetchYouTube, 30 * 60_000); setTimeout(fetchYouTube, 8_000);
+    tgTimer = setInterval(fetchTelegram, 20 * 60_000); setTimeout(fetchTelegram, 12_000);
+    steamTimer = setInterval(fetchSteam, 30 * 60_000); setTimeout(fetchSteam, 16_000);
     listen();
   });
 
+  client.on(Events.VoiceStateUpdate, (o, n) => {
+    if (!guild || (n.guild && n.guild.id !== guild.id)) return;
+    const mine = voiceChan;
+    if (n.id === cfg.ownerId || o.channelId === mine || n.channelId === mine) schedule();
+  });
   client.on(Events.PresenceUpdate, (_old, p) => { if (p.guild && p.guild.id === guild?.id && IDS.includes(p.userId)) schedule(); });
   client.on(Events.UserUpdate, (_old, u) => { if (IDS.includes(u.id)) schedule(); });
   client.on(Events.GuildMemberAdd, m => { if (IDS.includes(m.id)) schedule(); });
@@ -599,6 +698,8 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     clearInterval(hbTimer);
     clearInterval(gameTimer);
     clearInterval(ytTimer);
+    clearInterval(tgTimer);
+    clearInterval(steamTimer);
     try { gameTick(); } catch (e) {}
     clearTimeout(timer);
     if (ntfyAbort) ntfyAbort.abort();

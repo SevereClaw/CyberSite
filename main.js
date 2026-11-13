@@ -22,6 +22,8 @@ const DEFAULTS = {
   ignoreGames: ['Wallpaper Engine'],
   notify: 'dm',
   youtube: '@SevereClaw',
+  telegram: ['SevereSilence', 'gagavrodi'],
+  steam: 'SevereClaw',
   gameArt: {}, ntfyTopic: 'sc-site-u1bacv0rngvi2x', siteUrl: 'https://severeclaw.github.io/', gistId: '',
   autostart: true, startHidden: true, autoUpdate: true,
 };
