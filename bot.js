@@ -234,7 +234,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     }
     const used = new Set(days.flatMap(x => Object.keys(x.games)));
     const art = Object.fromEntries(Object.entries(act.games.art).filter(([k]) => used.has(k)));
-    return JSON.stringify({ updated: Date.now(), music: { day: act.music.day, tracks: act.music.tracks.map(({ key, ...t }) => t) }, games: { days, art }, youtube: act.youtube || null, telegram: act.telegram || null, steam: act.steam || null });
+    return JSON.stringify({ updated: Date.now(), music: { day: act.music.day, tracks: act.music.tracks.map(({ key, ...t }) => t) }, games: { days, art }, youtube: act.youtube || null, telegram: act.telegram || null, steam: act.steam || null, commits: act.commits || null });
   }
   let gameTimer = null;
 
@@ -327,6 +327,38 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
         actDirty = true; saveAct(); schedule();
       }
     } catch (e) { log('Steam: не получилось —', e.message); }
+  }
+
+  // ---------- лента изменений: последние коммиты из публичных репозиториев ----------
+  // Только публичные репозитории (список /users/…/repos приватные не отдаёт) и только первая строка сообщения.
+  let commitsTimer = null, ghLogin = null;
+  async function fetchCommits() {
+    if (cfg.commits === false) { if (act.commits) { act.commits = null; actDirty = true; schedule(); } return; }
+    try {
+      if (!ghLogin) ghLogin = (await gh('GET', '/user')).login;
+      const skip = new Set((cfg.commitsExclude || ['CyberSite']).map(x => String(x).toLowerCase()));
+      const repos = (await gh('GET', `/users/${ghLogin}/repos?per_page=100&sort=pushed&type=owner`))
+        .filter(r => !r.private && !r.fork && !skip.has(r.name.toLowerCase()))
+        .filter(r => Date.now() - Date.parse(r.pushed_at) < 30 * 864e5)
+        .slice(0, 8);
+      const all = [];
+      for (const r of repos) {
+        try {
+          const list = await gh('GET', `/repos/${r.full_name}/commits?per_page=5`);
+          for (const c of list) {
+            const msg = String(c.commit && c.commit.message || '').split('\n')[0].trim();
+            if (!msg || /^Merge (branch|pull request)/i.test(msg)) continue;
+            all.push({ repo: r.name, sha: c.sha.slice(0, 7), msg: msg.length > 140 ? msg.slice(0, 137) + '…' : msg,
+              time: Date.parse(c.commit.committer && c.commit.committer.date || c.commit.author.date), url: c.html_url });
+          }
+        } catch (e) { if (e.rateLimitUntil) throw e; }
+      }
+      all.sort((a, b) => b.time - a.time);
+      const top = all.slice(0, 10);
+      const was = JSON.stringify(act.commits);
+      act.commits = top;
+      if (JSON.stringify(top) !== was) { log(`Лента изменений: ${top.length ? 'последний коммит в ' + top[0].repo : 'коммитов нет'}`); actDirty = true; saveAct(); schedule(); }
+    } catch (e) { log('Лента изменений: не получилось —', e.message); }
   }
 
   // ---------- YouTube: последние ролики канала (лента RSS, без ключей) ----------
@@ -706,6 +738,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     ytTimer = setInterval(fetchYouTube, 30 * 60_000); setTimeout(fetchYouTube, 8_000);
     tgTimer = setInterval(fetchTelegram, 20 * 60_000); setTimeout(fetchTelegram, 12_000);
     steamTimer = setInterval(fetchSteam, 30 * 60_000); setTimeout(fetchSteam, 16_000);
+    commitsTimer = setInterval(fetchCommits, 20 * 60_000); setTimeout(fetchCommits, 20_000);
     listen();
   });
 
@@ -744,6 +777,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     clearInterval(ytTimer);
     clearInterval(tgTimer);
     clearInterval(steamTimer);
+    clearInterval(commitsTimer);
     try { gameTick(); } catch (e) {}
     clearTimeout(timer);
     if (ntfyAbort) ntfyAbort.abort();
