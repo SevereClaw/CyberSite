@@ -232,6 +232,9 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
       <h3>Люди на сайте</h3>
       <div class="fld"><label>Твой Discord ID</label><div class="inp"><input id="ownerId" spellcheck="false"></div></div>
 
+      <h3>YouTube</h3>
+      <div class="fld"><label>Канал на сайте<small>@ник или ID канала. Последние ролики показываются на сайте, проверка раз в 30 минут. <b>off</b> — не показывать</small></label><div class="inp"><input id="youtube" spellcheck="false"></div></div>
+
       <h3>Игры</h3>
       <div class="fld"><label>Не считать играми<small>Программы, которые Discord принимает за игры. По одной в строке, как в журнале после «Играет:»</small></label><div class="inp"><textarea id="ignoreGames" spellcheck="false" style="min-height:90px"></textarea></div></div>
 
@@ -261,7 +264,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt
 function toast(t, bad){ const el=$('toast'); el.textContent=t; el.className='toast on'+(bad?' bad':''); clearTimeout(toast.h); toast.h=setTimeout(()=>el.className='toast',4500); }
 const ST = {online:"в сети", idle:"отошёл", dnd:"не беспокоить", offline:"не в сети"};
 const SRC = { tg:"Telegram", ds:"Discord", yt:"YouTube", steam:"Steam", gh:"GitHub", search:"поиск", direct:"напрямую", other:"другие сайты" };
-const FIELDS = ['discordToken','guildId','logChannelId','githubToken','discordClientSecret','telegramBotToken','telegramBotName','ownerId'];
+const FIELDS = ['youtube','discordToken','guildId','logChannelId','githubToken','discordClientSecret','telegramBotToken','telegramBotName','ownerId'];
 
 /* куда сообщать о гостях */
 let NOTIFY = 'dm';
