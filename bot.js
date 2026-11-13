@@ -106,6 +106,10 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     if (line !== lastOwnerLine) { lastOwnerLine = line; log('Ты сейчас:', line); emit('owner', { line, user: u || null }); }
   }
 
+  // Плееры в режиме «текст песни строчками» кладут в статус текущую строку с ♪ —
+  // это не название трека, и на сайт такие строки не попадают.
+  const isLyric = t => typeof t === 'string' && /^\s*[♪♫🎵🎶]/.test(t);
+
   function snapshotUser(member) {
     const u = member.user;
     const p = member.presence;
@@ -115,11 +119,12 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       activities: (p ? p.activities : []).map(a => ({
         type: a.type,
         name: a.name,
-        details: a.details || null,
-        state: a.state || null,
+        details: isLyric(a.details) ? null : (a.details || null),
+        state: isLyric(a.state) ? null : (a.state || null),
         application_id: a.applicationId || null,
         timestamps: a.timestamps ? { start: ms(a.timestamps.start), end: ms(a.timestamps.end) } : null,
-        assets: a.assets ? { large_image: a.assets.largeImage || null } : null,
+        assets: a.assets ? { large_image: a.assets.largeImage || null, large_text: a.assets.largeText || null } : null,
+        lyric_mode: (isLyric(a.details) || isLyric(a.state)) || undefined,
         art: a.type === 0 ? (lookupArt(a.name), artCache.get(a.name) || null) : undefined,
       })),
     };
@@ -182,6 +187,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   try { act = Object.assign(act, JSON.parse(fs.readFileSync(ACT_PATH, 'utf8'))); } catch (e) {}
   let actDirty = true, lastTrackKey = '', tickN = 0, lastGamesKey = '';
   const saveAct = () => { try { fs.writeFileSync(ACT_PATH, JSON.stringify(act)); } catch (e) {} };
+  if (act.music && Array.isArray(act.music.tracks)) act.music.tracks = act.music.tracks.filter(t => t && t.title && !/^\s*[♪♫🎵🎶]/.test(t.title));
   function coverOf(a) {
     const img = a.assets && a.assets.large_image;
     if (!img) return null;
@@ -192,7 +198,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   function trackMusic(u) {
     const d = new Date().toLocaleDateString('sv-SE');
     if (act.music.day !== d) { act.music = { day: d, tracks: [] }; actDirty = true; }
-    const a = u && u.activities.find(x => x.type === 2 && (x.details || x.state));
+    const a = u && u.activities.find(x => x.type === 2 && x.details);   // без названия (строка 1 — текст песни) не записываем
     if (!a) { lastTrackKey = ''; return; }
     const key = [a.name, a.details, a.state].join('|');
     if (key === lastTrackKey) return;
@@ -200,7 +206,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     const last = act.music.tracks[0];
     if (last && last.key === key && Date.now() - last.time < 15 * 60_000) return;   // тот же трек после перезапуска
     const t = a.timestamps;
-    act.music.tracks.unshift({ key, title: a.details || a.state, artist: a.details ? a.state : null, app: a.name,
+    act.music.tracks.unshift({ key, title: a.details, artist: a.state || null, app: a.name,
       cover: coverOf(a), time: Date.now(), dur: t && t.start && t.end ? t.end - t.start : null });
     act.music.tracks.length = Math.min(act.music.tracks.length, 10);
     actDirty = true; saveAct(); schedule();
