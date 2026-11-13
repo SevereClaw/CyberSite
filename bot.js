@@ -335,42 +335,86 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   const unxml = t => String(t || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
   async function ytGet(url) {
     const r = await fetch(url, { signal: AbortSignal.timeout(20_000),
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'ru,en;q=0.8', Cookie: 'CONSENT=YES+1; SOCS=CAI' } });
-    if (!r.ok) throw new Error('YouTube ' + r.status);
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36',
+        'Accept-Language': 'ru,en;q=0.8', Cookie: 'CONSENT=YES+1; SOCS=CAI' } });
+    if (!r.ok) throw new Error('YouTube ответил ' + r.status);
+    if (/consent\.youtube\.com|accounts\.google/.test(r.url)) throw new Error('YouTube показал страницу согласия с cookies');
     return r.text();
+  }
+  // Запасной путь: список роликов со страницы канала (данные ytInitialData), если лента RSS не отвечает.
+  function videosFromPage(html) {
+    const m = html.match(/var ytInitialData\s*=\s*(\{[\s\S]*?\});\s*<\/script>/) || html.match(/ytInitialData"\]\s*=\s*(\{[\s\S]*?\});/);
+    if (!m) return [];
+    let data; try { data = JSON.parse(m[1]); } catch (e) { return []; }
+    const out = [], seen = new Set();
+    const text = t => t ? (t.simpleText || t.content || (t.runs || []).map(r => r.text).join('')) : '';
+    (function walk(o) {
+      if (!o || typeof o !== 'object' || out.length >= 8) return;
+      if (o.videoRenderer && o.videoRenderer.videoId) {
+        const v = o.videoRenderer;
+        if (!seen.has(v.videoId)) { seen.add(v.videoId); out.push({ id: v.videoId, title: text(v.title), published: null, publishedText: text(v.publishedTimeText),
+          views: parseInt(text(v.viewCountText).replace(/\D/g, '')) || null, short: false }); }
+        return;
+      }
+      if (o.lockupViewModel && o.lockupViewModel.contentId && /VIDEO/.test(o.lockupViewModel.contentType || 'VIDEO')) {
+        const v = o.lockupViewModel, md = v.metadata && v.metadata.lockupMetadataViewModel;
+        const rows = JSON.stringify(md && md.metadata || {});
+        const parts = [...rows.matchAll(/"content":"([^"]+)"/g)].map(x => x[1]);
+        if (!seen.has(v.contentId)) { seen.add(v.contentId); out.push({ id: v.contentId, title: md ? text(md.title) : '', published: null,
+          publishedText: parts.find(x => /назад|ago/.test(x)) || null, views: parseInt((parts.find(x => /просмотр|view/i.test(x)) || '').replace(/\D/g, '')) || null, short: false }); }
+        return;
+      }
+      for (const k in o) walk(o[k]);
+    })(data);
+    return out.filter(v => v.title).slice(0, 4);
   }
   async function fetchYouTube() {
     const h = ytHandle();
-    if (!h || h === 'off') return;
+    if (!h || h === 'off') { if (act.youtube) { act.youtube = null; actDirty = true; schedule(); } return; }
+    const handlePath = /^UC[\w-]{22}$/.test(h) ? 'channel/' + h : (h.startsWith('@') ? h : '@' + h);
+    let videos = [], id = /^UC[\w-]{22}$/.test(h) ? h : (cfg.youtubeChannelId && cfg.youtubeHandleFor === h ? cfg.youtubeChannelId : null);
+    let channelTitle = '', how = '';
     try {
-      let id = /^UC[\w-]{22}$/.test(h) ? h : (cfg.youtubeChannelId && cfg.youtubeHandleFor === h ? cfg.youtubeChannelId : null);
       if (!id) {
-        const page = await ytGet('https://www.youtube.com/' + (h.startsWith('@') ? h : '@' + h));
+        const page = await ytGet('https://www.youtube.com/' + handlePath);
         const m = page.match(/"externalId":"(UC[\w-]{22})"/) || page.match(/"channelId":"(UC[\w-]{22})"/) || page.match(/channel\/(UC[\w-]{22})/);
-        if (!m) throw new Error('не нашёл канал ' + h);
+        if (!m) throw new Error('не нашёл ID канала на странице ' + h);
         id = m[1]; cfg.youtubeChannelId = id; cfg.youtubeHandleFor = h; saveCfg();
         log(`YouTube: канал ${h} → ${id}`);
       }
       const xml = await ytGet('https://www.youtube.com/feeds/videos.xml?channel_id=' + id);
-      const videos = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].slice(0, 4).map(([, e]) => ({
+      videos = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].slice(0, 4).map(([, e]) => ({
         id: (e.match(/<yt:videoId>([^<]+)/) || [])[1],
         title: unxml((e.match(/<title>([^<]*)/) || [])[1]),
         published: Date.parse((e.match(/<published>([^<]+)/) || [])[1]) || null,
         views: +((e.match(/<media:statistics views="(\d+)"/) || [])[1] || 0) || null,
         short: /\/shorts\//.test(e),
       })).filter(v => v.id);
-      const channelTitle = unxml((xml.match(/<title>([^<]*)/) || [])[1]);
-      const was = JSON.stringify(act.youtube && act.youtube.videos);
-      act.youtube = { channelId: id, handle: h, title: channelTitle, videos, checked: Date.now() };
-      if (JSON.stringify(videos) !== was) {
-        log(`YouTube: ${videos.length ? 'последнее видео «' + videos[0].title + '»' : 'роликов нет'}`);
-        actDirty = true; saveAct(); schedule();
-      }
+      channelTitle = unxml((xml.match(/<title>([^<]*)/) || [])[1]);
+      how = 'лента RSS';
     } catch (e) {
-      log('YouTube: не получилось обновить —', e.message);
-      if (/не нашёл канал/.test(e.message)) { cfg.youtubeChannelId = ''; }
+      log('YouTube: лента RSS не сработала —', e.message, '— пробую страницу канала');
+    }
+    if (!videos.length) {
+      try {
+        const page = await ytGet('https://www.youtube.com/' + handlePath + '/videos');
+        videos = videosFromPage(page);
+        channelTitle = channelTitle || unxml((page.match(/<meta property="og:title" content="([^"]*)"/) || [])[1]);
+        how = 'страница канала';
+        if (!videos.length) log('YouTube: на странице канала роликов не нашёл (нет видео или YouTube поменял страницу)');
+      } catch (e) {
+        log('YouTube: не получилось открыть канал —', e.message, '(без VPN в режиме TUN YouTube может не открываться)');
+        return;
+      }
+    }
+    const was = JSON.stringify(act.youtube && act.youtube.videos);
+    act.youtube = { channelId: id, handle: h, title: channelTitle, videos, checked: Date.now() };
+    if (JSON.stringify(videos) !== was) {
+      log(`YouTube (${how}): ${videos.length ? 'последнее видео «' + videos[0].title + '»' : 'роликов нет'}`);
+      actDirty = true; saveAct(); schedule();
     }
   }
+
 
   // ---------- гости ----------
   const VIS_PATH = path.join(dataDir, 'visitors-data.json');
