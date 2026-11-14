@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('cs', {
   importConfig: file => ipcRenderer.invoke('import', file),
   exportConfig: () => ipcRenderer.invoke('export'),
   restart: () => ipcRenderer.invoke('restart'),
+  reviewAction: (id, a) => ipcRenderer.invoke('reviewAction', id, a),
   setHide: h => ipcRenderer.invoke('setHide', h),
   onCfg: cb => ipcRenderer.on('cfg', (_e, c) => cb(c)),
   open: url => ipcRenderer.invoke('open', url),

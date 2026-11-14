@@ -92,7 +92,7 @@ function log(...a) {
   send('log', line);
 }
 const state = { discord: { state: 'off', text: 'не запущен' }, gist: { state: 'off', text: '—' }, ntfy: { state: 'off', text: '—' },
-  owner: null, people: null, visitors: null, visits: [], update: null, imported: null };
+  owner: null, people: null, visitors: null, reviews: null, visits: [], update: null, imported: null };
 function emit(kind, v) {
   if (kind === 'visit') { state.visits.unshift(v); state.visits.length = Math.min(state.visits.length, 50); }
   else state[kind] = v;
@@ -261,6 +261,7 @@ ipcMain.handle('export', async () => {
   return { ok: true, file: r.filePath };
 });
 ipcMain.handle('restart', () => startBot());
+ipcMain.handle('reviewAction', async (_e, id, action) => bot ? bot.reviewAction(id, action) : false);
 ipcMain.handle('setHide', (_e, h) => { setHide(h); return cfg; });
 ipcMain.handle('open', (_e, url) => { if (/^https?:/.test(url)) shell.openExternal(url); });
 ipcMain.handle('openData', () => shell.openPath(DATA));

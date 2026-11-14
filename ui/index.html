@@ -132,6 +132,16 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
 .seg button+button{border-left:1px solid var(--line2)}
 .seg button:hover{color:var(--fg)}
 .seg button.on{background:var(--acc);color:#04121a;font-weight:600}
+.rv{border:1px solid var(--line);padding:14px 16px;margin-bottom:10px;background:var(--panel)}
+.rv .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rv .st{color:#ffd36b;letter-spacing:2px}
+.rv .rp{font-size:12px;color:var(--acc);border:1px solid rgba(102,224,255,.3);padding:2px 8px}
+.rv .nm{font-size:13px;color:var(--dim)}
+.rv time{margin-left:auto;font-size:12px;color:var(--faint)}
+.rv p{margin:8px 0 10px;white-space:pre-line}
+.rv .btns{margin-top:0}
+.rv.pend{border-color:rgba(255,211,107,.4)}
+.cnt{display:inline-block;min-width:18px;padding:0 5px;margin-left:auto;border-radius:9px;background:#ffd36b;color:#04121a;font-size:11px;font-weight:700;text-align:center;line-height:18px}
 </style>
 </head>
 <body>
@@ -146,6 +156,7 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
     <a data-p="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Главная</a>
     <a data-p="guests"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4a4 4 0 0 1 0 8M22 21c0-3-2-5-4-5.5"/></svg>Гости</a>
     <a data-p="friends"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3.2"/><circle cx="16.5" cy="9" r="3.2"/><path d="M2 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M12.5 15.4c1-.6 2.4-.9 4-.9 3.3 0 5.5 2.2 5.5 5.5"/></svg>Друзья</a>
+    <a data-p="reviews"><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>Отзывы<span class="cnt" id="rvCnt" style="display:none"></span></a>
     <a data-p="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Настройки</a>
     <a data-p="logs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Журнал</a>
     <span class="sp"></span>
@@ -203,6 +214,13 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
       <div id="frList"></div>
       <div class="add"><div class="inp"><input id="frNew" placeholder="ID или ссылка discord.com/users/… — ПКМ по человеку → Копировать ID" spellcheck="false"></div><button class="btn" id="frAdd">Добавить</button></div>
       <div class="btns" style="margin-top:22px;align-items:center"><button class="btn pri" id="frSave">Сохранить</button><span class="dirty" id="frDirty">есть несохранённые изменения</span></div>
+    </section>
+
+    <!-- ОТЗЫВЫ -->
+    <section class="page" id="p-reviews">
+      <h1>Отзывы</h1><p class="sub">Гости оставляют их на сайте у каждой программы. На сайт попадают только те, что ты опубликуешь. Новые приходят и в личку Discord, там тоже есть кнопки.</p>
+      <h3>Ждут проверки</h3><div id="rvPend"></div>
+      <h3>На сайте</h3><div id="rvAppr"></div>
     </section>
 
     <!-- НАСТРОЙКИ -->
@@ -384,6 +402,27 @@ for (const [id, k] of [['hAll','all'],['hGames','games'],['hMusic','music']])
     toast(e.target.checked ? (k === 'all' ? 'Невидимка: на сайте ты «не в сети»' : k === 'games' ? 'Игры скрыты с сайта' : 'Музыка скрыта с сайта') : 'Снова показываю на сайте'); };
 cs.onCfg(c => { CFG = c; renderHide(); });
 
+
+/* отзывы */
+const stars = n => '★'.repeat(n) + '☆'.repeat(5 - n);
+const when = t => new Date(t).toLocaleString('ru-RU', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'});
+function rvCard(r, pend){
+  return `<div class="rv${pend ? ' pend' : ''}"><div class="top"><span class="st">${stars(r.stars)}</span><span class="rp">${esc(r.repo)}</span><span class="nm">${esc(r.name)}</span><time>${when(r.time)}</time></div>
+    <p>${esc(r.text)}</p><div class="btns">${pend ? `<button class="btn pri" data-rv="approve" data-id="${r.id}">Опубликовать</button>` : ''}<button class="btn" data-rv="delete" data-id="${r.id}">Удалить</button></div></div>`;
+}
+function renderReviews(rv){
+  if (!rv) return;
+  $('rvPend').innerHTML = rv.pending.length ? rv.pending.map(r => rvCard(r, true)).join('') : '<div class="empty">Новых отзывов нет.</div>';
+  $('rvAppr').innerHTML = rv.approved.length ? rv.approved.map(r => rvCard(r, false)).join('') : '<div class="empty">Пока ни одного.</div>';
+  const c = $('rvCnt'); c.textContent = rv.pending.length; c.style.display = rv.pending.length ? '' : 'none';
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-rv]'); if (!b) return;
+  if (b.dataset.rv === 'delete' && !confirm('Удалить отзыв?')) return;
+  const ok = await cs.reviewAction(b.dataset.id, b.dataset.rv);
+  toast(!ok ? 'Бот не запущен или отзыва уже нет' : b.dataset.rv === 'approve' ? 'Опубликован, на сайте появится через минуту' : 'Удалён', !ok);
+});
+
 /* перетаскивание config.json */
 let dragN = 0;
 addEventListener('dragenter', e => { e.preventDefault(); dragN++; $('drop').classList.add('on'); });
@@ -397,6 +436,7 @@ const ago = t => { const s=(Date.now()-t)/1000; return s<60?'только что
 function pill(id, v){ const el=$(id); el.className='pill '+(v?.state||''); el.querySelector('p').textContent = v?.text || '—'; el.title = v?.text || ''; }
 function feed(list, n){ return list.length ? list.slice(0,n).map(v => `<div>${v.avatar?`<img src="${esc(v.avatar)}" alt="">`:''}<span>${esc(v.text)}</span><time>${ago(v.time)}</time></div>`).join('') : '<div class="empty">Пока никого.</div>'; }
 function render(s){
+  if (s.reviews) renderReviews(s.reviews);
   if (s.people && JSON.stringify(s.people) !== JSON.stringify(PEOPLE)){ PEOPLE = s.people; if (!$('frDirty').classList.contains('on')) renderFriends(); }
   pill('pDiscord', s.discord); pill('pGist', s.gist); pill('pNtfy', s.ntfy);
   $('setupBanner').classList.toggle('on', s.discord?.state === 'setup');

@@ -5,7 +5,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { Client, GatewayIntentBits, Events, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const clean = v => String(v || '').trim().replace(/^["'`]+|["'`]+$/g, '').replace(/^Bot\s+/i, '').replace(/\s+/g, '');
 
@@ -501,6 +501,66 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   const today = () => new Date().toLocaleDateString('sv-SE');      // 2026-11-11, по времени ноутбука
   let visDirty = true;
   function saveVis() { fs.writeFileSync(VIS_PATH, JSON.stringify(vis)); visDirty = true; schedule(); }
+  // ---------- отзывы о программах ----------
+  // На сайт попадают только одобренные тобой отзывы.
+  const RFILE = 'reviews.json';
+  const REV_PATH = path.join(dataDir, 'reviews-data.json');
+  let rev = { pending: [], approved: [] };
+  try { rev = Object.assign(rev, JSON.parse(fs.readFileSync(REV_PATH, 'utf8'))); } catch (e) {}
+  let revDirty = true;
+  const saveRev = () => { try { fs.writeFileSync(REV_PATH, JSON.stringify(rev)); } catch (e) {} revDirty = true; emit('reviews', rev); schedule(); };
+  function reviewsFile() {
+    return JSON.stringify({ updated: Date.now(), reviews: rev.approved.map(({ id, repo, stars, text, name, time }) => ({ id, repo, stars, text, name, time })) });
+  }
+  const starsTxt = n => '★'.repeat(n) + '☆'.repeat(5 - n);
+  function reviewButtons(id) {
+    return [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('rv:approve:' + id).setLabel('Опубликовать').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('rv:delete:' + id).setLabel('Удалить').setStyle(ButtonStyle.Danger))];
+  }
+  async function ownerDM() {
+    const me = await client.users.fetch(String(cfg.ownerId)).catch(() => null);
+    return me ? me.createDM().catch(() => null) : null;
+  }
+  async function onReview(m) {
+    const repo = String(m.repo || '').trim();
+    const stars = Math.round(+m.stars);
+    const text = String(m.text || '').replace(/\s+\n/g, '\n').trim().slice(0, 600);
+    const name = String(m.name || '').trim().slice(0, 40) || 'Аноним';
+    const vid = String(m.vid || '').slice(0, 20);
+    if (!/^[\w.-]{1,60}$/.test(repo) || !(stars >= 1 && stars <= 5) || text.length < 3) return;
+    if (vid && [...rev.pending, ...rev.approved].some(r => r.vid === vid && r.repo === repo)) return log(`Отзыв на ${repo}: повтор с того же браузера, пропускаю`);
+    if (rev.pending.length >= 200) return log('Отзывов на проверке слишком много (200), новые не принимаю');
+    const r = { id: crypto.randomBytes(5).toString('hex'), repo, stars, text, name, vid, time: Date.now() };
+    rev.pending.unshift(r);
+    saveRev();
+    log(`Новый отзыв на ${repo}: ${starsTxt(stars)} от «${name}»`);
+    emit('visit', { text: `Отзыв на ${repo}: ${starsTxt(stars)}`, time: Date.now() });
+    const dm = await ownerDM();
+    if (!dm) return;
+    const msg = await dm.send({
+      embeds: [new EmbedBuilder().setColor(0xffd36b).setTitle(`Новый отзыв · ${repo}`).setDescription(`${starsTxt(stars)}\n\n${text}`)
+        .setFooter({ text: `${name} · появится на сайте после одобрения` }).setTimestamp(new Date(r.time))],
+      components: reviewButtons(r.id),
+    }).catch(e => { log('Не смог прислать отзыв в личку:', e.message); return null; });
+    if (msg) { r.dm = { ch: msg.channelId, msg: msg.id }; saveRev(); }
+  }
+  async function reviewAction(id, action) {
+    const pi = rev.pending.findIndex(r => r.id === id), ai = rev.approved.findIndex(r => r.id === id);
+    const r = pi >= 0 ? rev.pending[pi] : ai >= 0 ? rev.approved[ai] : null;
+    if (!r) return false;
+    if (action === 'approve' && pi >= 0) { rev.pending.splice(pi, 1); rev.approved.unshift(r); log(`Отзыв на ${r.repo} опубликован`); }
+    else if (action === 'delete') { if (pi >= 0) rev.pending.splice(pi, 1); else rev.approved.splice(ai, 1); log(`Отзыв на ${r.repo} удалён`); }
+    else return false;
+    saveRev();
+    if (r.dm) {                                // убрать кнопки в личке
+      const ch = await client.channels.fetch(r.dm.ch).catch(() => null);
+      const msg = ch && await ch.messages.fetch(r.dm.msg).catch(() => null);
+      if (msg) msg.edit({ content: action === 'approve' ? '✅ Опубликован на сайте' : '🗑 Удалён', components: [] }).catch(() => {});
+    }
+    return true;
+  }
+
   function visitorsFile() {
     const d = today();
     return JSON.stringify({
@@ -556,10 +616,11 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     emit('people', { users, friends: friendList(), hide: hide() });
     const voice = voiceInfo();
     const usersJson = JSON.stringify([users, voice]);
-    if (!force && usersJson === lastUsersJson && !visDirty && !actDirty) return;
+    if (!force && usersJson === lastUsersJson && !visDirty && !actDirty && !revDirty) return;
     const files = { [FILE]: JSON.stringify({ updated: Date.now(), bot: online, site: siteInfo(), users, voice: online ? voice : null }) };
     if (visDirty || force) files[VFILE] = visitorsFile();
     if (actDirty || force) files[AFILE] = activityFile();
+    if (revDirty || force) files[RFILE] = reviewsFile();
     try {
       if (!cfg.gistId) await ensureGist(files);
       else {
@@ -585,6 +646,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       lastUsersJson = usersJson;
       visDirty = false;
       actDirty = false;
+      revDirty = false;
       lastSent = Date.now();
       errStreak = 0; nextAllowed = 0;
       emit('gist', { state: 'ok', text: 'обновлено ' + new Date().toLocaleTimeString('ru-RU') + (rate ? ` · запросов осталось ${rate.remaining} из ${rate.limit}` : ''), id: cfg.gistId });
@@ -733,6 +795,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
             let m; try { m = JSON.parse(ev.message); } catch (e) { continue; }
             if (m.t === 'visit') onVisit(m);
             else if (m.t === 'who') onWho(m);
+            else if (m.t === 'review') onReview(m);
             else if (m.t === 'login' && m.via === 'discord') onDiscordLogin(m.code);
             else if (m.t === 'login' && m.via === 'telegram') onTelegramLogin(m.user);
           }
@@ -786,6 +849,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     await client.application.fetch().catch(() => {});
     await publish(true);
     hbTimer = setInterval(() => publish(true), HEARTBEAT);
+    emit('reviews', rev);
     gameTimer = setInterval(gameTick, 60_000); gameTick();
     ytTimer = setInterval(fetchYouTube, 30 * 60_000); setTimeout(fetchYouTube, 8_000);
     tgTimer = setInterval(fetchTelegram, 20 * 60_000); setTimeout(fetchTelegram, 12_000);
@@ -795,6 +859,13 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     listen();
   });
 
+  client.on(Events.InteractionCreate, async i => {
+    if (!i.isButton() || !i.customId.startsWith('rv:')) return;
+    if (i.user.id !== String(cfg.ownerId)) return i.reply({ content: 'Это может сделать только владелец сайта.', ephemeral: true }).catch(() => {});
+    const [, action, id] = i.customId.split(':');
+    const ok = await reviewAction(id, action);
+    await i.update({ content: !ok ? 'Этого отзыва уже нет.' : action === 'approve' ? '✅ Опубликован на сайте' : '🗑 Удалён', components: [] }).catch(() => {});
+  });
   client.on(Events.VoiceStateUpdate, (o, n) => {
     if (!guild || (n.guild && n.guild.id !== guild.id)) return;
     const mine = voiceChan;
@@ -843,7 +914,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   // Поменялись «не показывать» или имена друзей — сразу выложить.
   function refresh() { lastUsersJson = ''; actDirty = true; if (guild) publish(true); }
 
-  return { start, stop, refresh };
+  return { start, stop, refresh, reviewAction, reviews: () => rev };
 }
 
 module.exports = { createBot, checkConfig };
