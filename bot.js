@@ -328,6 +328,18 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       } else if (was) { steamNow = null; log('Steam: вышел из игры'); schedule(); }
     } catch (e) { if (steamNow) log('Steam (сейчас): не получилось —', e.message); }
   }
+  const steamApps = new Map();        // appid -> { header, background } или null
+  async function steamApp(appid) {
+    if (!appid) return null;
+    if (steamApps.has(appid)) return steamApps.get(appid);
+    try {
+      const d = await steam(`https://store.steampowered.com/api/appdetails?appids=${appid}&l=english&filters=basic`);
+      const data = d[appid] && d[appid].success ? d[appid].data : null;
+      const v = data ? { header: data.header_image || data.capsule_image || null, background: data.background_raw || data.background || null } : null;
+      steamApps.set(appid, v);
+      return v;
+    } catch (e) { return null; }
+  }
   function steamActivity() {
     if (!steamNow || hide().all || hide().games) return null;
     const a = { type: 0, name: steamNow.name, details: null, state: null, application_id: null, source: 'steam',
@@ -335,11 +347,13 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     if (isIgnored(a)) return null;
     const own = artCache.get(steamNow.name);
     if (!own && !artCache.has(steamNow.name)) lookupArt(steamNow.name);
+    const app = steamNow.appid ? steamApps.get(steamNow.appid) : null;
+    if (steamNow.appid && !steamApps.has(steamNow.appid)) steamApp(steamNow.appid).then(v => { if (v) schedule(); });
     a.art = steamNow.appid ? {
       appid: +steamNow.appid,
       hero: `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${steamNow.appid}/library_hero.jpg`,
-      header: `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${steamNow.appid}/header.jpg`,
-      background: (own && own.background) || null,
+      header: (app && app.header) || (own && own.header) || `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${steamNow.appid}/header.jpg`,
+      background: (app && app.background) || (own && own.background) || null,
     } : (own || null);
     return a;
   }
@@ -362,8 +376,14 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
           return parseFloat(t.replace(/[^\d.]/g, '')) || 0;
         };
         return { name: tag(g, 'gameName'), appid, h2w: num(tag(g, 'hoursPlayed')), total: num(tag(g, 'hoursOnRecord')),
-          img: appid ? `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appid}/header.jpg` : (tag(g, 'gameLogo') || null) };
+          img: null, logo: tag(g, 'gameLogo') || tag(g, 'gameIcon') || null };
       }).filter(g => g.name);
+      // Настоящая ссылка на шапку из магазина; если магазин не ответил — логотип из профиля.
+      for (const g of games) {
+        const app = await steamApp(g.appid);
+        g.img = (app && app.header) || g.logo || (g.appid ? `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${g.appid}/header.jpg` : null);
+        if (g.logo === g.img) g.logo = null;
+      }
       const steam = { profile: `https://steamcommunity.com/${path_}`, name: tag(xml, 'steamID'), level: null,
         state: tag(xml, 'onlineState'), stateText: unhtml(tag(xml, 'stateMessage')), games, checked: Date.now() };
       const was = JSON.stringify(act.steam && act.steam.games);
