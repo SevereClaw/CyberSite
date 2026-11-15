@@ -103,14 +103,33 @@ function send(ch, v) { if (win && !win.isDestroyed()) win.webContents.send(ch, v
 
 // ---------- бот ----------
 let bot = null;
-async function startBot() {
+// Если Discord недоступен (VPN ещё не поднялся, нет сети), бот сам пробует снова:
+// через 30 с, потом 1, 2, 4 минуты и дальше раз в 5 минут.
+let retryTimer = null, retryN = 0;
+function retryLater() {
+  clearTimeout(retryTimer);
+  const wait = Math.min(30_000 * 2 ** retryN, 300_000);
+  retryN++;
+  log(`Попробую подключиться к Discord снова через ${Math.round(wait / 1000)} с`);
+  emit('discord', { state: 'connecting', text: `нет связи с Discord, повтор в ${new Date(Date.now() + wait).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` });
+  retryTimer = setTimeout(() => startBot(true), wait);
+}
+async function startBot(isRetry) {
+  clearTimeout(retryTimer);
+  if (!isRetry) retryN = 0;
   if (bot) { const b = bot; bot = null; await b.stop().catch(() => {}); }
   state.gist = { state: 'off', text: '—' }; state.ntfy = { state: 'off', text: '—' };
   if (!cfg) { emit('discord', { state: 'setup', text: 'нужно настроить' }); return; }
   const err = checkConfig(cfg);
   if (err) { emit('discord', { state: 'setup', text: err }); return; }
-  bot = createBot({ cfg, dataDir: DATA, saveCfg, log, emit });
-  bot.start().catch(() => {});
+  const b = bot = createBot({ cfg, dataDir: DATA, saveCfg, log, emit });
+  try { await b.start(); retryN = 0; }
+  catch (e) {
+    if (bot !== b) return;                                   // уже перезапустили вручную
+    // Неверный токен или выключенные разрешения сами не исправятся — тут ждём тебя.
+    if (/токен неверный|INTENT|Reset Token/i.test(e.message)) return;
+    retryLater();
+  }
 }
 
 // ---------- «не показывать на сайте» ----------
