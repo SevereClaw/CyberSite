@@ -35,12 +35,14 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   const hide = () => cfg.hide || {};
   const ignored = () => new Set((cfg.ignoreGames || []).map(n => String(n).trim().toLowerCase()).filter(Boolean));
   const isIgnored = a => a.type === 0 && ignored().has(String(a.name).toLowerCase());
+  // Карточка VPN из Music → Discord — не игра, какой бы вид ей ни дал Discord («Играет» или «Соревнуется»).
+  const isVpn = a => !!a && /^nekoboxp3r$/i.test(String(a.name || '').trim());
   // Что из твоего статуса можно показывать на сайте (переключатели «не показывать»).
   function privacy(u) {
     if (!u) return u;
     const h = hide();
     if (h.all) return Object.assign({}, u, { discord_status: 'offline', activities: [] });
-    return Object.assign({}, u, { activities: u.activities.filter(a => !isIgnored(a) && !(h.games && (a.type === 0 || a.type === 5)) && !(h.music && a.type === 2)) });
+    return Object.assign({}, u, { activities: u.activities.filter(a => !isIgnored(a) && !(h.games && (a.type === 0 || a.type === 5) && !isVpn(a)) && !(h.music && a.type === 2)) });
   }
   const FILE = 'presence.json';
   const VFILE = 'visitors.json';
@@ -102,7 +104,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     let line;
     if (!u) line = 'тебя нет на сервере — статус не виден';
     else if (!u.activities.length) line = `${u.discord_status}, Discord не передаёт ни одной активности`;
-    else line = u.discord_status + ' | ' + u.activities.map(a => `${KIND_RU[a.type] || a.type}: ${a.type === 4 ? a.state : a.name}${a.source === 'steam' ? ' (из Steam)' : ''}`).join(' | ');
+    else line = u.discord_status + ' | ' + u.activities.map(a => `${isVpn(a) ? 'VPN' : KIND_RU[a.type] || a.type}: ${a.type === 4 ? a.state : a.name}${a.source === 'steam' ? ' (из Steam)' : ''}`).join(' | ');
     if (line !== lastOwnerLine) { lastOwnerLine = line; log('Ты сейчас:', line); emit('owner', { line, user: u || null }); }
   }
 
@@ -116,16 +118,18 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     return {
       discord_user: { id: u.id, username: u.username, global_name: u.globalName || null, avatar: u.avatar || null },
       discord_status: p ? p.status : 'offline',
-      activities: (p ? p.activities : []).map(a => ({
+      // VPN — в конец списка: первой на сайте идёт настоящая игра
+      activities: (p ? [...p.activities].sort((x, y) => isVpn(x) - isVpn(y)) : []).map(a => ({
         type: a.type,
         name: a.name,
+        vpn: isVpn(a) || undefined,
         details: isLyric(a.details) ? null : (a.details || null),
         state: isLyric(a.state) ? null : (a.state || null),
         application_id: a.applicationId || null,
         timestamps: a.timestamps ? { start: ms(a.timestamps.start), end: ms(a.timestamps.end) } : null,
         assets: a.assets ? { large_image: a.assets.largeImage || null, large_text: a.assets.largeText || null } : null,
         lyric_mode: (isLyric(a.details) || isLyric(a.state)) || undefined,
-        art: a.type === 0 ? (lookupArt(a.name), artCache.get(a.name) || null) : undefined,
+        art: a.type === 0 && !isVpn(a) ? (lookupArt(a.name), artCache.get(a.name) || null) : undefined,
       })),
     };
   }
@@ -216,7 +220,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     const delta = act.lastTick ? Math.min(now - act.lastTick, 120_000) : 0;
     act.lastTick = now;
     const m = guild && guild.members.cache.get(cfg.ownerId);
-    const games = (hide().all || hide().games) ? [] : (m && m.presence ? m.presence.activities : []).filter(a => a.type === 0 && !isIgnored(a)).map(a => a.name);
+    const games = (hide().all || hide().games) ? [] : (m && m.presence ? m.presence.activities : []).filter(a => a.type === 0 && !isIgnored(a) && !isVpn(a)).map(a => a.name);
     { const sa = steamActivity(); if (sa && !games.some(g => g.toLowerCase() === sa.name.toLowerCase())) games.unshift(sa.name); }
     const d = new Date().toLocaleDateString('sv-SE');
     if (games.length && delta) {
@@ -635,7 +639,8 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       // (например, карточка NekoBoxP3R из Music → Discord), и встаёт первой — фон берётся от неё.
       const sa = steamActivity(), u = users[cfg.ownerId];
       if (sa && u && !u.activities.some(a => a.type === 0 && a.name.toLowerCase() === sa.name.toLowerCase())) {
-        const i = u.activities.findIndex(a => a.type === 0);
+        let i = u.activities.findIndex(a => a.type === 0);
+        if (i < 0) i = u.activities.findIndex(a => a.vpn);        // игра — перед карточкой VPN
         if (i < 0) u.activities.push(sa); else u.activities.splice(i, 0, sa);
       }
     }
