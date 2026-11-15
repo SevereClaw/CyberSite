@@ -50,7 +50,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   const HEARTBEAT = 240_000;   // раз в 4 минуты, даже если ничего не поменялось
   // Защита лимитов GitHub: после ошибки пауза растёт (30 с, 1 мин, 2 мин… до 10 мин),
   // при «rate limit» ждём до времени сброса, которое сообщает GitHub.
-  let nextAllowed = 0, errStreak = 0, rate = null;
+  let nextAllowed = 0, errStreak = 0, rate = null, limitHits = 0;
   const hhmm = t => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
   const client = new Client({
@@ -165,10 +165,19 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       const err = new Error(`GitHub ${r.status}: ${text}`);
       if ((r.status === 403 || r.status === 429) && /rate limit/i.test(text)) {
         const after = +r.headers.get('retry-after');
-        err.rateLimitUntil = after ? Date.now() + after * 1000 : (rate && rate.remaining === 0 && rate.reset) ? rate.reset + 5000 : Date.now() + 15 * 60_000;
+        const hourly = !!(rate && rate.remaining === 0 && rate.reset);
+        limitHits++;
+        // GitHub назвал срок — ждём его; кончился часовой запас — до его сброса;
+        // иначе («слишком часто») — 2, 4, 8, 15 минут, а не сразу четверть часа.
+        err.rateLimitUntil = after ? Date.now() + after * 1000 : hourly ? rate.reset + 5000
+          : Date.now() + Math.min(2 * 60_000 * 2 ** (limitHits - 1), 15 * 60_000);
+        err.rateLimitWhy = hourly
+          ? `кончился часовой запас запросов этого токена GitHub (${rate.limit} в час; его тратят все программы с этим токеном)`
+          : 'GitHub решил, что запросы идут слишком часто' + (after ? ` (просит подождать ${Math.ceil(after / 60)} мин)` : '');
       }
       throw err;
     }
+    limitHits = 0;
     return r.status === 204 ? null : r.json();
   }
 
@@ -609,6 +618,21 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   let lastSent = 0;
   let timer = null;
 
+  // То же занятие с началом/концом в пределах 3 секунд от уже опубликованных — берём опубликованные.
+  let steadyTs = new Map();
+  function steady(users) {
+    const next = new Map();
+    for (const [id, u] of Object.entries(users)) for (const a of (u && u.activities) || []) {
+      if (!a.timestamps) continue;
+      const key = [id, a.type, a.name, a.details, a.state].join('|');
+      const was = steadyTs.get(key);
+      for (const k of ['start', 'end'])
+        if (was && a.timestamps[k] && was[k] && Math.abs(a.timestamps[k] - was[k]) <= 3000) a.timestamps[k] = was[k];
+      next.set(key, { start: a.timestamps.start, end: a.timestamps.end });
+    }
+    steadyTs = next;
+  }
+
   // Публикации идут строго по одной: два одновременных PATCH дают у GitHub ошибку 409.
   let busy = null, busyAt = 0, again = null, conflicts = 0;
   async function publish(force = false, online = true) {
@@ -644,6 +668,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
         if (i < 0) u.activities.push(sa); else u.activities.splice(i, 0, sa);
       }
     }
+    steady(users);
     trackMusic(users[cfg.ownerId]);
     emit('people', { users, friends: friendList(), hide: hide() });
     const voice = voiceInfo();
@@ -688,8 +713,8 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
       errStreak++;
       if (e.rateLimitUntil) {
         nextAllowed = e.rateLimitUntil;
-        log(`GitHub ограничил запросы, следующая попытка в ${hhmm(nextAllowed)}`);
-        emit('gist', { state: 'error', text: `GitHub временно ограничил запросы. Продолжу сам в ${hhmm(nextAllowed)}, данные не потеряются.` });
+        log(`GitHub ограничил запросы: ${e.rateLimitWhy || 'причину не назвал'}. Сайт не обновляется до ${hhmm(nextAllowed)}`);
+        emit('gist', { state: 'error', text: `GitHub временно ограничил запросы — сайт показывает старое. Продолжу сам в ${hhmm(nextAllowed)}, данные не потеряются.` });
       } else {
         nextAllowed = Date.now() + Math.min(30_000 * 2 ** (errStreak - 1), 600_000);
         log('Не смог обновить gist:', e.message, `— повтор в ${hhmm(nextAllowed)}`);
