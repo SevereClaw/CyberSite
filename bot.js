@@ -217,7 +217,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     act.lastTick = now;
     const m = guild && guild.members.cache.get(cfg.ownerId);
     const games = (hide().all || hide().games) ? [] : (m && m.presence ? m.presence.activities : []).filter(a => a.type === 0 && !isIgnored(a)).map(a => a.name);
-    { const sa = steamActivity(); if (sa && !games.length) games.push(sa.name); }
+    { const sa = steamActivity(); if (sa && !games.some(g => g.toLowerCase() === sa.name.toLowerCase())) games.unshift(sa.name); }
     const d = new Date().toLocaleDateString('sv-SE');
     if (games.length && delta) {
       const day = act.games.days[d] = act.games.days[d] || {};
@@ -631,9 +631,12 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     logOwner(users);
     if (users[cfg.ownerId]) users[cfg.ownerId] = privacy(users[cfg.ownerId]);
     {
+      // Игра из Steam добавляется, даже если в статусе уже есть другая «Играет»
+      // (например, карточка NekoBoxP3R из Music → Discord), и встаёт первой — фон берётся от неё.
       const sa = steamActivity(), u = users[cfg.ownerId];
       if (sa && u && !u.activities.some(a => a.type === 0 && a.name.toLowerCase() === sa.name.toLowerCase())) {
-        if (!u.activities.some(a => a.type === 0)) u.activities.push(sa);
+        const i = u.activities.findIndex(a => a.type === 0);
+        if (i < 0) u.activities.push(sa); else u.activities.splice(i, 0, sa);
       }
     }
     trackMusic(users[cfg.ownerId]);
