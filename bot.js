@@ -306,11 +306,18 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {}, resta
           if (text.length > 420) text = text.slice(0, 400).replace(/\s+\S*$/, '') + '…';
           return { id, text, photo, date, views, url: id ? `https://t.me/${id}` : `https://t.me/${c}` };
         }).filter(p => p.id && (p.text || p.photo));
-        if (posts.length) out.push({ channel: c, title: title || '@' + c, avatar, post: posts[posts.length - 1] });
+        if (!posts.length) continue;
+        // сверху — последний пост с картинкой (или просто последний), под ним — последние текстовые сообщения,
+        // чтобы было видно и фото, и что я пишу
+        const post = [...posts].reverse().find(p => p.photo) || posts[posts.length - 1];
+        const texts = posts.filter(p => p.text && p !== post).slice(-4).reverse()
+          .map(p => ({ text: p.text.length > 280 ? p.text.slice(0, 260).replace(/\s+\S*$/, '') + '…' : p.text, date: p.date, url: p.url }));
+        out.push({ channel: c, title: title || '@' + c, avatar, post, texts });
       } catch (e) { log(`Telegram @${c}: не получилось —`, e.message); }
     }
     if (!out.length) return;
-    out.sort((a, b) => (b.post.date || 0) - (a.post.date || 0));
+    const last = c => Math.max(c.post.date || 0, ...c.texts.map(t => t.date || 0));
+    out.sort((a, b) => last(b) - last(a));
     const was = JSON.stringify(act.telegram);
     act.telegram = out;
     if (JSON.stringify(out) !== was) { log(`Telegram: последний пост в @${out[0].channel}`); actDirty = true; saveAct(); schedule(); }
@@ -915,7 +922,7 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {}, resta
     emit('reviews', rev);
     gameTimer = setInterval(gameTick, 60_000); gameTick();
     ytTimer = setInterval(fetchYouTube, 30 * 60_000); setTimeout(fetchYouTube, 8_000);
-    tgTimer = setInterval(fetchTelegram, 20 * 60_000); setTimeout(fetchTelegram, 12_000);
+    tgTimer = setInterval(fetchTelegram, 10 * 60_000); setTimeout(fetchTelegram, 12_000);
     steamTimer = setInterval(fetchSteam, 30 * 60_000); setTimeout(fetchSteam, 16_000);
     steamNowTimer = setInterval(fetchSteamNow, 180_000); setTimeout(fetchSteamNow, 6_000);
     commitsTimer = setInterval(fetchCommits, 20 * 60_000); setTimeout(fetchCommits, 20_000);
