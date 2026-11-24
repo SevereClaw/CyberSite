@@ -278,8 +278,9 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {}, resta
     return { channel: ch.name, since: voiceSince, people, others: all.length - people.length };
   }
 
-  // ---------- Telegram: последний пост публичных каналов (страница t.me/s, без ключей) ----------
+  // ---------- Telegram: последние посты публичных каналов (страница t.me/s, без ключей) ----------
   let tgTimer = null;
+  const TG_POSTS = 8;                    // сколько последних постов каждого канала выкладывать на сайт
   const tgChannels = () => (Array.isArray(cfg.telegram) ? cfg.telegram : String(cfg.telegram || '').split(/[\s,]+/))
     .map(c => String(c).trim().replace(/^https?:\/\/t\.me\/(s\/)?/i, '').replace(/^@/, '').replace(/\/.*$/, '')).filter(c => /^\w{4,}$/.test(c));
   const unhtml = t => String(t || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
@@ -296,28 +297,41 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {}, resta
         const title = unhtml((html.match(/<div class="tgme_channel_info_header_title"[^>]*>([\s\S]*?)<\/div>/) || [])[1]);
         const avatar = (html.match(/<i class="tgme_page_photo_image[^"]*"[^>]*><img src="([^"]+)"/) || [])[1] || null;
         const blocks = html.split('<div class="tgme_widget_message_wrap').slice(1);
+        const bg = /background-image:url\('([^']+)'\)/;
         const posts = blocks.map(b => {
           const id = (b.match(/data-post="([^"]+)"/) || [])[1];
-          const textHtml = (b.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/) || [])[1];
-          const photo = (b.match(/tgme_widget_message_(?:photo_wrap|video_thumb)[^>]*style="[^"]*background-image:url\('([^']+)'\)/) || [])[1] || null;
+          // свой текст поста (не цитата из ответа — у неё класс js-message_reply_text)
+          const textHtml = (b.match(/<div class="tgme_widget_message_text js-message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/)
+            || b.match(/<div class="tgme_widget_message_text(?! js-message_reply_text)[^"]*"[^>]*>([\s\S]*?)<\/div>/) || [])[1];
+          // все фото и превью видео (в альбоме их несколько)
+          let photos = [...b.matchAll(/class="tgme_widget_message_(?:photo_wrap|video_thumb|roundvideo_thumb)[^"]*"[^>]*?style="([^"]*)"/g)]
+            .map(m => (m[1].match(bg) || [])[1]).filter(Boolean);
+          if (!photos.length){                                   // картинка из превью ссылки
+            const lp = (b.match(/class="link_preview_(?:right_)?image"[^>]*?style="([^"]*)"/) || [])[1];
+            if (lp && bg.test(lp)) photos = [lp.match(bg)[1]];
+          }
+          photos = [...new Set(photos)].slice(0, 4);
           const date = Date.parse((b.match(/<time datetime="([^"]+)"/) || [])[1]) || null;
           const views = (b.match(/<span class="tgme_widget_message_views">([^<]+)/) || [])[1] || null;
           let text = unhtml(textHtml);
+          if (!text){                                             // музыка/файл или ссылка без подписи
+            const doc = unhtml((b.match(/<div class="tgme_widget_message_document_title[^"]*"[^>]*>([\s\S]*?)<\/div>/) || [])[1]);
+            const extra = unhtml((b.match(/<div class="tgme_widget_message_document_extra[^"]*"[^>]*>([\s\S]*?)<\/div>/) || [])[1]);
+            const lpt = unhtml((b.match(/<div class="link_preview_title"[^>]*>([\s\S]*?)<\/div>/) || [])[1]);
+            if (doc) text = (b.includes('tgme_widget_message_audio') ? '♪ ' : '') + doc + (extra ? ' — ' + extra : '');
+            else if (lpt) text = lpt;
+          }
           if (text.length > 420) text = text.slice(0, 400).replace(/\s+\S*$/, '') + '…';
-          return { id, text, photo, date, views, url: id ? `https://t.me/${id}` : `https://t.me/${c}` };
-        }).filter(p => p.id && (p.text || p.photo));
+          return { id, text, photo: photos[0] || null, photos, date, views, url: id ? `https://t.me/${id}` : `https://t.me/${c}` };
+        }).filter(p => p.id && (p.text || p.photos.length));
         if (!posts.length) continue;
-        // сверху — последний пост с картинкой (или просто последний), под ним — последние текстовые сообщения,
-        // чтобы было видно и фото, и что я пишу
-        const post = [...posts].reverse().find(p => p.photo) || posts[posts.length - 1];
-        const texts = posts.filter(p => p.text && p !== post).slice(-4).reverse()
-          .map(p => ({ text: p.text.length > 280 ? p.text.slice(0, 260).replace(/\s+\S*$/, '') + '…' : p.text, date: p.date, url: p.url }));
-        out.push({ channel: c, title: title || '@' + c, avatar, post, texts });
+        // последние посты канала, новые сверху; post — самый новый (для старой версии сайта)
+        const recent = posts.slice(-TG_POSTS).reverse();
+        out.push({ channel: c, title: title || '@' + c, avatar, post: recent[0], posts: recent });
       } catch (e) { log(`Telegram @${c}: не получилось —`, e.message); }
     }
     if (!out.length) return;
-    const last = c => Math.max(c.post.date || 0, ...c.texts.map(t => t.date || 0));
-    out.sort((a, b) => last(b) - last(a));
+    out.sort((a, b) => (b.post.date || 0) - (a.post.date || 0));
     const was = JSON.stringify(act.telegram);
     act.telegram = out;
     if (JSON.stringify(out) !== was) { log(`Telegram: последний пост в @${out[0].channel}`); actDirty = true; saveAct(); schedule(); }
