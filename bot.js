@@ -26,7 +26,7 @@ function checkConfig(cfg) {
   return null;
 }
 
-function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
+function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {}, restart = () => {} }) {
   let stopped = false, hbTimer = null, ntfyAbort = null;
   const saveCfg = () => persist(cfg);
 
@@ -867,25 +867,31 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
     }
   }
 
+  // Ссылка, по которой бота можно добавить на сервер, и список серверов, где он уже есть, —
+  // их показывают «Настройки» рядом с полем «ID сервера».
+  const inviteUrl = () => client.user ? `https://discord.com/oauth2/authorize?client_id=${client.user.id}&scope=bot&permissions=0` : '';
+  const emitGuilds = () => emit('guilds', {
+    invite: inviteUrl(),
+    current: guild ? guild.id : null,
+    list: [...client.guilds.cache.values()].map(g => ({ id: g.id, name: g.name })),
+  });
+
   client.once(Events.ClientReady, async () => {
     guild = client.guilds.cache.get(String(cfg.guildId))
       || await client.guilds.fetch(String(cfg.guildId)).catch(() => null);
     if (!guild) {
       const list = [...client.guilds.cache.values()];
       log(`Сервера ${cfg.guildId} среди серверов бота нет. Бот состоит на: ${list.map(g => `${g.name} (${g.id})`).join(', ') || 'ни одном'}`);
-      if (list.length === 1) {
-        guild = list[0];
-        log(`Беру единственный сервер бота: «${guild.name}», ID исправлен в настройках`);
-        cfg.guildId = guild.id;
-        saveCfg();
-      } else {
-        const text = list.length
-          ? `В настройках стоит ID ${cfg.guildId}, а бот состоит на: ${list.map(g => `«${g.name}» — ${g.id}`).join('; ')}. Вставь нужный ID в настройки.`
-          : 'Бот не состоит ни на одном сервере. Пригласи его: Developer Portal → OAuth2 → URL Generator → галочка bot → открой ссылку.';
-        emit('discord', { state: 'error', text });
-        return;
-      }
+      // Сам на другой сервер не переключаемся: в «Настройках» его можно выбрать в один клик,
+      // а когда бота пригласят на нужный, он подключится сам (GuildCreate ниже).
+      const text = `Бота нет на сервере ${cfg.guildId}. Пригласи его: «Настройки» → «Пригласить бота на сервер», статусы заработают сами.`
+        + (list.length ? ` Или выбери там сервер, где бот уже есть: ${list.map(g => `«${g.name}»`).join(', ')}.` : '');
+      log('Ссылка, чтобы пригласить бота:', inviteUrl());
+      emitGuilds();
+      emit('discord', { state: 'error', text });
+      return;
     }
+    emitGuilds();
     await guild.members.fetch({ user: IDS, withPresences: true }).catch(e => log('fetch members:', e.message));
     const missing = IDS.filter(id => !guild.members.cache.has(id));
     log(`Вошёл как ${client.user.tag}, сервер «${guild.name}». Слежу за ${IDS.length - missing.length} из ${IDS.length}.`);
@@ -932,6 +938,19 @@ function createBot({ cfg, dataDir, saveCfg: persist, log, emit = () => {} }) {
   client.on(Events.UserUpdate, (_old, u) => { if (IDS.includes(u.id)) schedule(); });
   client.on(Events.GuildMemberAdd, m => { if (IDS.includes(m.id)) schedule(); });
   client.on(Events.GuildMemberRemove, m => { if (IDS.includes(m.id)) schedule(); });
+  // Бота пригласили на сервер, которого ждали, — перезапускаемся и начинаем следить там.
+  client.on(Events.GuildCreate, g => {
+    emitGuilds();
+    if (!guild && !stopped && g.id === String(cfg.guildId)) {
+      log(`Бот добавлен на сервер «${g.name}» — подключаюсь к нему`);
+      restart();
+    }
+  });
+  // Сервер удалили или бота с него выгнали — перезапуск покажет, что делать дальше.
+  client.on(Events.GuildDelete, g => {
+    emitGuilds();
+    if (guild && g.id === guild.id && !stopped) { log(`Бота больше нет на сервере «${guild.name}»`); restart(); }
+  });
 
 
   async function start() {

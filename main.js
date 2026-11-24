@@ -13,8 +13,10 @@ app.setAppUserModelId('io.github.severeclaw.cybersite');
 
 const DATA = app.getPath('userData');            // %APPDATA%\CyberSite — переживает обновления
 const CFG_PATH = path.join(DATA, 'config.json');
+// Discord-сервер, где сидит бот и видит статусы. Сменить можно в «Настройках» → «ID сервера».
+const SITE_GUILD = '1571960941875040298';
 const DEFAULTS = {
-  discordToken: '', githubToken: '', guildId: '', logChannelId: '',
+  discordToken: '', githubToken: '', guildId: SITE_GUILD, logChannelId: '',
   discordClientSecret: '', telegramBotToken: '', telegramBotName: '',
   ownerId: '326495406970109962',
   friends: ['952898114321281084', '552120303153578015', '813521412165861397', '839747625887465482', '985113810266386432', '983770743198347294'].map(id => ({ id, name: '' })),
@@ -37,9 +39,16 @@ const looksLikeConfig = o => o && typeof o === 'object' && ('discordToken' in o 
 let cfg = null;
 const normFriends = list => (Array.isArray(list) ? list : []).map(f => typeof f === 'string' ? { id: f, name: '' } : { id: String(f.id || ''), name: String(f.name || '') })
   .filter(f => /^\d{17,20}$/.test(f.id)).filter((f, i, a) => a.findIndex(x => x.id === f.id) === i);
-function norm(c) { c.friends = normFriends(c.friends); c.hide = Object.assign({ games: false, music: false, all: false }, c.hide || {}); return c; }
+function norm(c) {
+  // Разовый переезд: прежний сервер удалён, статусы теперь берутся с SITE_GUILD (и из старого config.json тоже).
+  // Потом ID в настройках можно менять как угодно — сюда больше не вернёмся.
+  if (c.guildMovedTo !== SITE_GUILD) { c.guildId = SITE_GUILD; c.guildMovedTo = SITE_GUILD; }
+  if (!String(c.guildId || '').trim()) c.guildId = SITE_GUILD;
+  c.friends = normFriends(c.friends); c.hide = Object.assign({ games: false, music: false, all: false }, c.hide || {}); return c; }
 function loadCfg() {
-  try { cfg = norm(Object.assign({}, DEFAULTS, readJson(CFG_PATH))); } catch (e) { cfg = null; }
+  let raw = null;
+  try { raw = readJson(CFG_PATH); cfg = norm(Object.assign({}, DEFAULTS, raw)); } catch (e) { cfg = null; }
+  if (cfg && raw.guildMovedTo !== cfg.guildMovedTo) try { saveCfg(cfg); } catch (e) {}   // запомнить переезд на новый сервер
   return cfg;
 }
 function saveCfg(c) {
@@ -122,7 +131,7 @@ async function startBot(isRetry) {
   if (!cfg) { emit('discord', { state: 'setup', text: 'нужно настроить' }); return; }
   const err = checkConfig(cfg);
   if (err) { emit('discord', { state: 'setup', text: err }); return; }
-  const b = bot = createBot({ cfg, dataDir: DATA, saveCfg, log, emit });
+  const b = bot = createBot({ cfg, dataDir: DATA, saveCfg, log, emit, restart: () => { if (bot === b) startBot(); } });
   try { await b.start(); retryN = 0; }
   catch (e) {
     if (bot !== b) return;                                   // уже перезапустили вручную

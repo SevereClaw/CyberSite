@@ -92,6 +92,10 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
 .inp textarea{min-height:120px;resize:vertical}
 .inp button{border:0;background:none;color:var(--dim);padding:0 12px;cursor:pointer}
 .inp button:hover{color:var(--acc)}
+.guilds{font-size:12px;color:var(--faint);margin-top:8px;line-height:1.9}
+.guilds button{border:1px solid var(--line2);background:none;color:inherit;font:inherit;padding:2px 9px;margin:0 6px 0 0;cursor:pointer;transition:.15s}
+.guilds button:hover,.guilds button.on{border-color:var(--acc);color:var(--acc)}
+.guilds a{color:var(--acc);cursor:pointer}
 .err{color:var(--err);font-size:12px;margin-top:6px;display:none}
 .tg{display:flex;align-items:center;gap:12px;padding:10px 0;cursor:pointer}
 .tg input{display:none}
@@ -234,7 +238,7 @@ h3::after{content:"";flex:1;height:1px;background:var(--line)}
 
       <h3>Discord</h3>
       <div class="fld"><label>Токен бота<small><a data-url="https://discord.com/developers/applications">Developer Portal</a> → Bot → Reset Token</small></label><div><div class="inp"><input type="password" id="discordToken" spellcheck="false"><button data-eye="discordToken">👁</button></div><div class="err" id="e-discordToken"></div></div></div>
-      <div class="fld"><label>ID сервера<small>ПКМ по серверу → Копировать ID сервера</small></label><div class="inp"><input id="guildId" spellcheck="false"></div></div>
+      <div class="fld"><label>ID сервера<small>Сервер, где бот видит твой статус. ПКМ по серверу → Копировать ID сервера, вставь и сохрани</small></label><div><div class="inp"><input id="guildId" spellcheck="false"></div><div class="guilds" id="guilds"></div></div></div>
       <div class="fld"><label>Сообщать о гостях<small>Кто зашёл на сайт и кто отметился</small></label><div class="seg" id="notify">
         <button data-v="dm">Мне в личку</button><button data-v="channel">В канал</button><button data-v="off">Не сообщать</button></div></div>
       <div class="fld" id="chanRow"><label>Канал для гостей<small>ПКМ по каналу → Копировать ID канала</small></label><div class="inp"><input id="logChannelId" spellcheck="false"></div></div>
@@ -314,6 +318,7 @@ let CFG = {};
 function fill(c){
   CFG = c || {};
   for (const k of FIELDS) $(k).value = CFG[k] || '';
+  renderGuilds();
   FR = (CFG.friends||[]).map(f => typeof f === 'string' ? {id:f, name:''} : {id:f.id, name:f.name||''}); renderFriends(); frDirty(false);
   renderHide();
   $('autostart').checked = CFG.autostart !== false;
@@ -435,7 +440,21 @@ addEventListener('drop', e => { e.preventDefault(); dragN=0; $('drop').classList
 const ago = t => { const s=(Date.now()-t)/1000; return s<60?'только что':s<3600?Math.round(s/60)+' мин':Math.round(s/3600)+' ч'; };
 function pill(id, v){ const el=$(id); el.className='pill '+(v?.state||''); el.querySelector('p').textContent = v?.text || '—'; el.title = v?.text || ''; }
 function feed(list, n){ return list.length ? list.slice(0,n).map(v => `<div>${v.avatar?`<img src="${esc(v.avatar)}" alt="">`:''}<span>${esc(v.text)}</span><time>${ago(v.time)}</time></div>`).join('') : '<div class="empty">Пока никого.</div>'; }
+/* серверы бота под полем «ID сервера»: выбрать в один клик или пригласить бота на новый */
+let GUILDS = null;
+function renderGuilds(){
+  const g = GUILDS, el = $('guilds'); if (!g) { el.innerHTML = ''; return; }
+  const cur = $('guildId').value.trim();
+  const list = g.list.length
+    ? 'Бот на серверах: ' + g.list.map(x => `<button data-guild="${esc(x.id)}" class="${x.id===cur?'on':''}" title="${esc(x.id)}">${esc(x.name)}</button>`).join('')
+    : 'Бот пока не состоит ни на одном сервере.';
+  const here = g.list.some(x => x.id === cur);
+  el.innerHTML = list + (g.invite ? `<br>${cur && !here ? 'Бота нет на этом сервере — ' : ''}<a data-url="${esc(g.invite)}">Пригласить бота на сервер</a>${cur && !here ? ', статусы заработают сами' : ''}` : '');
+}
+$('guilds').addEventListener('click', e => { const b = e.target.closest('[data-guild]'); if (!b) return; $('guildId').value = b.dataset.guild; renderGuilds(); toast('Сервер выбран — нажми «Сохранить и перезапустить бота»'); });
+$('guildId').addEventListener('input', renderGuilds);
 function render(s){
+  if (s.guilds && JSON.stringify(s.guilds) !== JSON.stringify(GUILDS)){ GUILDS = s.guilds; renderGuilds(); }
   if (s.reviews) renderReviews(s.reviews);
   if (s.people && JSON.stringify(s.people) !== JSON.stringify(PEOPLE)){ PEOPLE = s.people; if (!$('frDirty').classList.contains('on')) renderFriends(); }
   pill('pDiscord', s.discord); pill('pGist', s.gist); pill('pNtfy', s.ntfy);

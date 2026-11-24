@@ -24,7 +24,10 @@
 
 1. **Бот Discord:** [Developer Portal](https://discord.com/developers/applications) → New Application → Bot →
    Reset Token. Там же включи **PRESENCE INTENT** и **SERVER MEMBERS INTENT**. Пригласи бота: OAuth2 → URL Generator → `bot`.
-2. **ID сервера и канала:** включи режим разработчика в Discord, ПКМ → Копировать ID.
+2. **Сервер:** по умолчанию бот работает на сервере `1571960941875040298` — пригласи его туда.
+   Чтобы перенести статусы на другой сервер, вставь его ID в «Настройки» → «ID сервера» и сохрани
+   (ПКМ по серверу → Копировать ID, нужен режим разработчика). Там же — серверы, где бот уже есть,
+   и ссылка «Пригласить бота на сервер»: как только бот зайдёт, статусы появятся сами.
 3. **Токен GitHub:** [создать](https://github.com/settings/tokens/new?scopes=gist&description=CyberSite) — classic, только `gist`.
 4. **Отметки гостей (по желанию):** Discord Client Secret (+ Redirect `https://severeclaw.github.io/` в OAuth2)
    и токен Telegram-бота (`/newbot`, затем `/setdomain` → `severeclaw.github.io` в @BotFather).
